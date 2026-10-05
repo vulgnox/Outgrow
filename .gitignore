@@ -1,0 +1,14 @@
+# user data: NEVER commit (accounts, PIN hashes, DMs)
+data/
+*.db
+*.db-wal
+*.db-shm
+INVITE_CODE.txt
+__pycache__/
+*.pyc
+*.log
+.env
+# laptop-only helper scripts (hard-coded /home/nox paths)
+check.sh
+deploy_local.sh
+funnel_on.sh

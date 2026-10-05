@@ -1,0 +1,16 @@
+data/
+*.db
+*.db-wal
+*.db-shm
+INVITE_CODE.txt
+.git
+__pycache__/
+*.pyc
+*.log
+.env
+check.sh
+deploy_local.sh
+funnel_on.sh
+share.sh
+run.sh
+test_api.py

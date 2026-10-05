@@ -1,0 +1,16 @@
+# Litestream config: replicates the SQLite file to any S3-compatible bucket (Cloudflare R2, Backblaze B2, ...).
+# All values come from environment variables so no secrets live in git.
+dbs:
+  - path: ${OUTGROW_DB}
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: outgrow
+        endpoint: ${LITESTREAM_ENDPOINT}
+        region: ${LITESTREAM_REGION}
+        force-path-style: true
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        sync-interval: 5s
+        snapshot-interval: 6h
+        retention: 72h

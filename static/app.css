@@ -42,7 +42,10 @@ label{display:block;font-size:12.5px;color:var(--mut);margin:10px 0 5px}
 .pill{font-size:11px;padding:2px 8px;border-radius:99px;background:#7c5cff33;color:var(--acc2);font-weight:700}
 .banner{padding:11px 13px;border-radius:12px;margin:10px 0;font-size:14px;border:1px solid}
 .banner.nudge{background:#2a1a08;border-color:#7a4a10;color:#ffd08a}.banner.twice{background:#2a1118;border-color:#6b1b2b;color:#ffb3bf}.banner.fresh{background:#102a22;border-color:#1b6b58;color:#9bf0d6}
+.banner.rival{background:#2a1a08;border-color:#7a4a10;color:#ffd08a}.banner.rival.ahead{background:#2a1118;border-color:#6b1b2b;color:#ffb3bf}.banner.rival.behind{background:#102a22;border-color:#1b6b58;color:#9bf0d6}
+.banner.boss{background:#1a0a12;border-color:#6b1b2b;color:#ffb3bf}.banner.boss.win{background:#102a22;border-color:#1b6b58;color:#9bf0d6}.banner.boss.fail{background:#2a1118;border-color:#6b1b2b;color:#ffb3bf}.banner.boss.active{background:#1a0a12;border-color:#6b1b2b;color:#ffb3bf}
 .live-strip{background:#0f2f28;border:1px solid #1b6b58;border-radius:12px;padding:10px 12px;margin:10px 0;font-size:14px}
+.crown-holder{background:#2a2008;border:1px solid #7a4a10;border-radius:12px;padding:12px;margin:10px 0;text-align:center}.crown-emoji{font-size:28px;display:block;margin-bottom:4px}
 .heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:3px}
 .heat i{aspect-ratio:1;border-radius:3px;background:#1b1b2a;display:block}
 .hrs{display:flex;align-items:flex-end;gap:2px;height:70px}.hrs i{flex:1;background:var(--acc);border-radius:2px 2px 0 0;min-height:2px}
@@ -65,7 +68,7 @@ label{display:block;font-size:12.5px;color:var(--mut);margin:10px 0 5px}
 .fab{position:fixed;right:14px;bottom:calc(88px + env(safe-area-inset-bottom));z-index:15;border-radius:99px;padding:13px 16px;background:#2a1118;border:1px solid #6b1b2b;color:#ffb3bf;font-weight:700;box-shadow:0 8px 30px #000a}
 .confetti{position:fixed;top:-12px;width:9px;height:14px;z-index:60;animation:fall 2.4s ease-in forwards;pointer-events:none}
 @keyframes fall{to{transform:translateY(105vh) rotate(720deg);opacity:.9}}
-.auth{max-width:420px;margin:8vh auto 0}.logo{font-size:40px;font-weight:900;letter-spacing:-.04em;background:linear-gradient(135deg,#fff,#b69cff 60%,#7c5cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.auth{max-width:420px;margin:8vh auto 0}.logo{font-size:34px;font-weight:900;letter-spacing:-.04em;background:linear-gradient(135deg,#fff,#b69cff 60%,#7c5cff);-webkit-background-clip:text;background-clip:text;color:transparent}
 .mood{display:flex;gap:6px}.mood span{flex:1;text-align:center;padding:10px 0;border-radius:12px;background:var(--card2);border:1px solid var(--line);font-size:22px;cursor:pointer}.mood span.on{border-color:var(--acc);background:#7c5cff33}
 .ch{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.ch:last-child{border:0}
 .ch .st{display:flex;gap:4px}.ch .st button{padding:4px 8px;font-size:15px;opacity:.35;border-radius:9px}.ch .st button.on{opacity:1;background:#7c5cff33;border-color:var(--acc)}
@@ -91,3 +94,14 @@ a{color:var(--acc2)}
 .daysep span{position:relative;background:var(--bg);padding:0 10px;font-size:11px;color:var(--mut)}
 .composer{display:flex;gap:8px;align-items:flex-end;padding-top:8px;flex:none}
 .composer textarea{min-height:44px;max-height:120px;resize:none;flex:1}
+
+/* chat v2: reply / react / edit / mentions */
+.msg{cursor:pointer}.msg.sel{background:#7c5cff14}
+.msg.ment{border-left:3px solid var(--warn);background:#ffb02010}
+.men{color:var(--acc2);font-weight:700}
+.qt{border-left:2px solid var(--acc);padding:2px 8px;margin:2px 0 4px;font-size:12.5px;color:var(--mut);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.acts button{padding:5px 8px;font-size:15px;border-radius:10px}.acts button.on{border-color:var(--acc);background:#7c5cff33}
+.rxs{display:flex;flex-wrap:wrap}
+.ctx{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--card2);border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:10px;padding:6px 10px;margin-top:8px;font-size:13px;min-width:0}.ctx .ell{flex:1;min-width:0}
+.flash{animation:flash 1.2s}@keyframes flash{from{background:#7c5cff55}}
+.mh b{cursor:pointer}

@@ -1,0 +1,6 @@
+[Unit]
+Description=RAGDAMAXING database backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/ragdamaxing/backup.sh

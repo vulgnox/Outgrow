@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OUTGROW — multiplayer discipline engine for exam season.
+RAGDAMAXING — multiplayer discipline engine for exam season.
 Zero dependencies (Python 3.9+ stdlib only). SQLite storage. Mobile-first web UI in ./static.
 
 Run:  python3 server.py        (then open http://localhost:8765)
@@ -27,15 +27,25 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+def env(name, default=""):
+    """RAGDAMAXING_<NAME> wins; the old OUTGROW_<NAME> still works so existing configs keep working."""
+    for prefix in ("RAGDAMAXING_", "OUTGROW_"):
+        v = os.environ.get(prefix + name)
+        if v is not None:
+            return v
+    return default
+
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(ROOT, "static")
 DATA_DIR = os.path.join(ROOT, "data")
-DB_PATH = os.environ.get("OUTGROW_DB", os.path.join(DATA_DIR, "outgrow.db"))
+_DB_NEW, _DB_OLD = os.path.join(DATA_DIR, "ragdamaxing.db"), os.path.join(DATA_DIR, "outgrow.db")
+DB_PATH = env("DB") or (_DB_OLD if os.path.exists(_DB_OLD) and not os.path.exists(_DB_NEW) else _DB_NEW)
 PORT = int(os.environ.get("PORT", "8765"))
-WEBHOOK = os.environ.get("OUTGROW_DISCORD_WEBHOOK", "")
-BIND = os.environ.get("OUTGROW_BIND", "0.0.0.0")  # set 127.0.0.1 behind a tunnel/reverse proxy
-ADMINS = {n.strip().lower() for n in os.environ.get("OUTGROW_ADMINS", "").split(",") if n.strip()}  # usernames that get the Server dashboard
-LEGACY_CSV = os.environ.get("OUTGROW_LEGACY_CSV", os.path.join(ROOT, "..", "growth_tracker", "form_data", "growth_data.csv"))
+WEBHOOK = env("DISCORD_WEBHOOK")
+BIND = env("BIND", "0.0.0.0")  # set 127.0.0.1 behind a tunnel/reverse proxy
+ADMINS = {n.strip().lower() for n in env("ADMINS").split(",") if n.strip()}  # usernames that get the Server dashboard
+LEGACY_CSV = env("LEGACY_CSV", os.path.join(ROOT, "..", "growth_tracker", "form_data", "growth_data.csv"))
 ROLLOVER_HOUR = 3  # a "day" ends at 3 AM, so late-night study still counts for the day you started
 SUBJECTS = ["Physics", "Chemistry", "Maths", "English", "Other"]
 CORE = ["Physics", "Chemistry", "Maths"]
@@ -48,8 +58,16 @@ HABITS = [
     ("screen", "Screen control (<1h waste)", "📵", 30),
 ]
 
-RANKS = [(1, "Drifter"), (2, "Awake"), (3, "Initiate"), (4, "Grinder"), (6, "Locked-In"), (8, "Relentless"),
-         (10, "Dominant"), (13, "A+ Reborn"), (16, "Beyond A+"), (20, "OUTGROWN")]
+STOPWATCH_CAP = 240  # minutes. Forgot to stop the stopwatch? You still only get 4h.
+
+# (level, title, emoji). Same XP curve as before, only the names changed (and there are way more of them).
+RANKS = [(1, "Lazy Larva", "🐛"), (2, "Snooze Slayer", "⏰"), (3, "Rag Rookie", "🧽"), (4, "Desk Goblin", "👺"),
+         (5, "Chapter Cannibal", "🍖"), (6, "Caffeine Demon", "☕"), (8, "Midnight Menace", "🌑"),
+         (10, "Syllabus Slaughterer", "🪓"), (12, "Formula Fiend", "🧪"), (14, "Brain Reactor", "☢️"),
+         (16, "PYQ Predator", "🦖"), (18, "Topper Terminator", "🤖"), (20, "Ragda Overlord", "👹"),
+         (23, "Cerebral Warlord", "⚔️"), (26, "Rank Reaper", "💀"), (30, "Ragdamaxxer", "🗿"),
+         (35, "Gigabrain Gladiator", "🧠"), (40, "Eldritch Grinder", "🐙"), (46, "AIR 1 Apparition", "👻"),
+         (55, "RAGDAMAXED GOD", "⚡")]
 
 SYLLABUS = {
     "Physics": {
@@ -111,6 +129,7 @@ CREATE TABLE IF NOT EXISTS feed(id INTEGER PRIMARY KEY, crew_id INTEGER, user_id
 CREATE TABLE IF NOT EXISTS reactions(feed_id INTEGER, user_id INTEGER, emoji TEXT, PRIMARY KEY(feed_id, user_id));
 CREATE TABLE IF NOT EXISTS nudges(id INTEGER PRIMARY KEY, from_id INTEGER, to_id INTEGER, day TEXT, UNIQUE(from_id, to_id, day));
 CREATE TABLE IF NOT EXISTS duels(id INTEGER PRIMARY KEY, crew_id INTEGER, a INTEGER, b INTEGER, days INTEGER, start TEXT, end TEXT, status TEXT, winner INTEGER);
+CREATE TABLE IF NOT EXISTS boss_battles(id INTEGER PRIMARY KEY, crew_id INTEGER, day TEXT, target_min INTEGER, actual_min INTEGER, passed INTEGER, UNIQUE(crew_id, day));
 CREATE TABLE IF NOT EXISTS chests(user_id INTEGER, day TEXT, reward TEXT, PRIMARY KEY(user_id, day));
 CREATE TABLE IF NOT EXISTS badges(user_id INTEGER, id TEXT, day TEXT, PRIMARY KEY(user_id, id));
 CREATE TABLE IF NOT EXISTS legacy(username TEXT, day TEXT, done INTEGER, total INTEGER);
@@ -118,6 +137,7 @@ CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, thread TEXT NOT NULL
 CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread, id);
 CREATE INDEX IF NOT EXISTS idx_msg_recip ON messages(recip, id);
 CREATE TABLE IF NOT EXISTS chat_reads(user_id INTEGER, thread TEXT, last_id INTEGER DEFAULT 0, PRIMARY KEY(user_id, thread));
+CREATE TABLE IF NOT EXISTS msg_reacts(msg_id INTEGER, user_id INTEGER, emoji TEXT, PRIMARY KEY(msg_id, user_id));
 """
 
 
@@ -206,8 +226,11 @@ def level_of(xp):
 def level_info(xp):
     L = level_of(xp)
     lo, hi = 60 * (L - 1) ** 2, 60 * L ** 2
-    rank = [n for l, n in RANKS if L >= l][-1]
-    return {"level": L, "rank": rank, "xp": xp, "lo": lo, "hi": hi, "pct": round((xp - lo) / (hi - lo) * 100, 1)}
+    idx = max(i for i, r in enumerate(RANKS) if L >= r[0])
+    nxt = RANKS[idx + 1] if idx + 1 < len(RANKS) else None
+    return {"level": L, "rank": RANKS[idx][1], "emoji": RANKS[idx][2], "xp": xp, "lo": lo, "hi": hi,
+            "pct": round((xp - lo) / (hi - lo) * 100, 1),
+            "next_rank": nxt[1] if nxt else None, "next_emoji": nxt[2] if nxt else None, "next_at": nxt[0] if nxt else None}
 
 
 def award(c, key, amount, label, uid=None, day=None, quiet=False):
@@ -223,13 +246,35 @@ def award(c, key, amount, label, uid=None, day=None, quiet=False):
     return int(amount)
 
 
-def post_hook(msg):
+def post_hook(msg, embed=None):
+    """Send to Discord webhook. embed = dict with keys: title, description, color, fields[], thumbnail, footer."""
+    if not WEBHOOK:
+        return
+    payload = {}
+    if msg:
+        payload["content"] = msg[:1900]
+    if embed:
+        payload["embeds"] = [embed]
     try:
-        req = urllib.request.Request(WEBHOOK, data=json.dumps({"content": msg[:1900]}).encode(),
-                                     headers={"Content-Type": "application/json", "User-Agent": "outgrow"})
+        req = urllib.request.Request(WEBHOOK, data=json.dumps(payload).encode(),
+                                     headers={"Content-Type": "application/json", "User-Agent": "ragdamaxing"})
         urllib.request.urlopen(req, timeout=8)
     except Exception:
         pass
+
+
+def make_embed(title, description, color, fields=None, thumbnail=None, footer=None, username=None):
+    """Build a Discord embed dict."""
+    e = {"title": title, "description": description, "color": color}
+    if fields:
+        e["fields"] = [{"name": k, "value": v, "inline": True} for k, v in fields.items()]
+    if thumbnail:
+        e["thumbnail"] = {"url": thumbnail}
+    if footer:
+        e["footer"] = {"text": footer}
+    if username:
+        e["author"] = {"name": username}
+    return e
 
 
 def feed(c, kind, text, uid=None):
@@ -239,8 +284,114 @@ def feed(c, kind, text, uid=None):
         return
     c.conn.execute("INSERT INTO feed(crew_id,user_id,ts,kind,text) VALUES(?,?,?,?,?)",
                    (u["crew_id"], uid, now().isoformat(timespec="seconds"), kind, text))
-    if WEBHOOK and kind in ("badge", "levelup", "streak", "comeback", "test", "duel", "crew"):
-        threading.Thread(target=post_hook, args=(f"**{u['display']}** {text}",), daemon=True).start()
+    if WEBHOOK and kind in ("badge", "levelup", "streak", "comeback", "test", "duel", "crew", "record", "boss"):
+        embed = build_feed_embed(u, kind, text)
+        threading.Thread(target=post_hook, args=(None, embed), daemon=True).start()
+
+
+def build_feed_embed(u, kind, text):
+    """Build a rich Discord embed for each feed event type."""
+    color_map = {
+        "badge": 0x7c5cff,      # purple
+        "levelup": 0xffb020,    # gold
+        "streak": 0xff5c8a,     # pink
+        "comeback": 0x22d3a6,   # green
+        "test": 0x3ea6ff,       # blue
+        "duel": 0xff7a45,       # orange
+        "crew": 0xb6f442,       # lime
+        "record": 0xe879f9,     # magenta
+        "boss": 0xff0066,       # red-pink for boss battle
+    }
+    emoji_map = {
+        "badge": "🏅", "levelup": "⬆️", "streak": "🔥", "comeback": "🌱",
+        "test": "📝", "duel": "⚔️", "crew": "🏁", "record": "👑", "boss": "👹"
+    }
+    color = color_map.get(kind, 0x7c5cff)
+    emoji = emoji_map.get(kind, "📢")
+    
+    # Custom descriptions per type
+    if kind == "badge":
+        # text format: "earned 🏅 Badge Name"
+        return make_embed(
+            f"{emoji} Badge Unlocked!",
+            f"**{u['display']}** {text}",
+            color,
+            fields={"XP": "+50"},
+            thumbnail=u["emoji"],
+            footer=f"RAGDAMAXING · {u['username']}"
+        )
+    elif kind == "levelup":
+        # text format: "reached level X · 🏷️ Title ⬆️"
+        li = level_info(total_xp(c.conn, u["id"]))
+        return make_embed(
+            f"{emoji} Level Up — Level {li['level']}!",
+            f"**{u['display']}** is now **{li['emoji']} {li['rank']}**",
+            color,
+            fields={"Total XP": f"{li['xp']:,}", "Progress": f"{li['pct']}% to next rank"},
+            thumbnail=li["emoji"],
+            footer=f"RAGDAMAXING · {u['username']}"
+        )
+    elif kind == "streak":
+        # text format: "hit a N-day streak 🔥"
+        return make_embed(
+            f"{emoji} {text}",
+            f"**{u['display']}** is on fire!",
+            color,
+            fields={"Streak": text.split(" ")[2]},  # extract "N-day"
+            thumbnail="🔥",
+            footer=f"RAGDAMAXING · {u['username']}"
+        )
+    elif kind == "comeback":
+        return make_embed(
+            f"{emoji} Redemption!",
+            f"**{u['display']}** {text}",
+            color,
+            fields={"Bonus": "+100 XP"},
+            thumbnail="🌱",
+            footer=f"RAGDAMAXING · {u['username']}"
+        )
+    elif kind == "test":
+        return make_embed(
+            f"{emoji} Test Logged",
+            f"**{u['display']}** {text}",
+            color,
+            thumbnail="📝",
+            footer=f"RAGDAMAXING · {u['username']}"
+        )
+    elif kind == "duel":
+        return make_embed(
+            f"{emoji} Duel Complete",
+            f"**{u['display']}** {text}",
+            color,
+            thumbnail="⚔️",
+            footer=f"RAGDAMAXING · {u['username']}"
+        )
+    elif kind == "crew":
+        return make_embed(
+            f"{emoji} Crew Goal!",
+            f"**{u['display']}** {text}",
+            color,
+            fields={"Reward": "+100 XP each"},
+            thumbnail="🏁",
+            footer=f"RAGDAMAXING · {u['username']}"
+        )
+    elif kind == "record":
+        return make_embed(
+            f"{emoji} New Record!",
+            f"**{u['display']}** {text}",
+            color,
+            thumbnail="👑",
+            footer=f"RAGDAMAXING · {u['username']}"
+        )
+    elif kind == "boss":
+        return make_embed(
+            f"{emoji} DAILY BOSS BATTLE",
+            text,
+            color,
+            thumbnail="👹",
+            footer=f"RAGDAMAXING · Daily Challenge"
+        )
+    return make_embed("RAGDAMAXING", text, color, footer=f"RAGDAMAXING · {u['username']}")
 
 
 # ----------------------------------------------------------------------------- streak engine
@@ -353,7 +504,8 @@ def get_stats(conn, u):
             "weeklies": one("SELECT COUNT(*) FROM weekly WHERE user_id=?"),
             "redeems": one("SELECT COUNT(*) FROM xp WHERE user_id=? AND key LIKE 'redeem:%'"),
             "longest": u["longest"], "run": u["run"], "veteran": one("SELECT COUNT(*) FROM xp WHERE user_id=? AND key='legacy:season0'"),
-            "ratio": ratio, "last7": last7}
+            "ratio": ratio, "last7": last7,
+            "best_session": one("SELECT COALESCE(MAX(minutes),0) FROM focus WHERE user_id=? AND kind='timer'")}
 
 
 BADGES = [
@@ -377,7 +529,12 @@ BADGES = [
     ("refl7", "🪞", "Self-Aware", "7 nightly reflections", lambda s: s["reflections"] >= 7),
     ("weekly1", "🧭", "Navigator", "First weekly review", lambda s: s["weeklies"] >= 1),
     ("veteran", "🎖️", "Season 0 Veteran", "Used the original Growth Tracker", lambda s: s["veteran"] >= 1),
-    ("outgrown", "🦋", "Outgrown", "7-day average beats your old A+ baseline", lambda s: s["ratio"] >= 1.0 and s["last7"] > 0),
+    ("outgrown", "🦋", "Ragdamaxed", "7-day average beats your old A+ baseline", lambda s: s["ratio"] >= 1.0 and s["last7"] > 0),
+    ("h500", "☠️", "500 Hours", "500 hours of focus", lambda s: s["minutes"] >= 30000),
+    ("st60", "💠", "Diamond Chain", "60-day streak", lambda s: s["longest"] >= 60),
+    ("marathon", "🏃", "Marathoner", "2 hours in one sitting", lambda s: s["best_session"] >= 120),
+    ("beast", "🐉", "Ragda Beast", "3 hours in one sitting", lambda s: s["best_session"] >= 180),
+    ("deep100", "🕳️", "Abyss Walker", "100 deep blocks (50+ min)", lambda s: s["deep"] >= 100),
 ]
 
 
@@ -424,6 +581,7 @@ def evaluate(c):
     check_badges(c)
     if u["crew_id"]:
         team_goal(c)
+        check_boss_battle(c)
         resolve_duels(c)
 
 
@@ -443,6 +601,66 @@ def team_goal(c):
     if sum(mins.values()) >= goal and mins[u["id"]] >= 300:  # you must carry some weight to share the loot
         if award(c, f"crewgoal:{iso(ws)}", 100, "Crew goal smashed this week"):
             feed(c, "crew", "shared in the crew weekly goal 🏁 +100 XP")
+
+
+def check_boss_battle(c):
+    """Daily Boss Battle: crew hits a shared target, everyone gets rewarded or penalized."""
+    u = c.user
+    if not u["crew_id"]:
+        return
+    crew = q1(c.conn, "SELECT * FROM crews WHERE id=?", (u["crew_id"],))
+    if not crew:
+        return
+    
+    t = today()
+    ts = iso(t)
+    ws = wstart(t)  # FIX: was missing
+    
+    # Check if already resolved today
+    done = c.conn.execute("SELECT 1 FROM boss_battles WHERE crew_id=? AND day=?", (crew["id"], ts)).fetchone()
+    if done:
+        return
+    
+    # Get crew members
+    mem = q(c.conn, "SELECT id FROM users WHERE crew_id=?", (crew["id"],))
+    if len(mem) < 2:
+        return
+    
+    # Calculate today's total focus (timer only, verified)
+    total_timer = 0
+    for m in mem:
+        total_timer += c.conn.execute(
+            "SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day=? AND kind='timer'",
+            (m["id"], ts)
+        ).fetchone()[0]
+    
+    # Boss target: crew_size * 2.5 hours (150 min each) - scales with crew
+    target = len(mem) * 150
+    passed = total_timer >= target
+    
+    # Record the battle
+    c.conn.execute(
+        "INSERT INTO boss_battles(crew_id, day, target_min, actual_min, passed) VALUES(?,?,?,?,?)",
+        (crew["id"], ts, target, total_timer, 1 if passed else 0)
+    )
+    
+    if passed:
+        # Everyone gets +50 XP, 20% chance of streak freeze
+        for m in mem:
+            award(c, f"boss:{ts}", 50, "Daily Boss Battle defeated!", uid=m["id"], quiet=(m["id"] != u["id"]))
+            if random.random() < 0.2:
+                c.conn.execute("UPDATE users SET freezes=MIN(2, freezes+1) WHERE id=?", (m["id"],))
+        feed(c, "boss", f"👹 **DAILY BOSS DEFEATED!** Crew hit {total_timer//60}h{total_timer%60:02d} / {target//60}h{target%60:02d} — everyone gets +50 XP!")
+    else:
+        # Crew loses a "life" - track in boss_battles, 3 fails = no weekly goal XP this week
+        fails = c.conn.execute(
+            "SELECT COUNT(*) FROM boss_battles WHERE crew_id=? AND day>=? AND passed=0",
+            (crew["id"], iso(ws))
+        ).fetchone()[0]
+        if fails >= 3:
+            feed(c, "boss", f"💀 **BOSS BATTLE FAILED** ({fails}/3 this week). Crew hit {total_timer//60}h{total_timer%60:02d} / {target//60}h{target%60:02d}. Weekly goal XP disabled until next week!")
+        else:
+            feed(c, "boss", f"👹 **Boss Battle Failed** ({fails}/3). Crew hit {total_timer//60}h{total_timer%60:02d} / {target//60}h{target%60:02d}. One more chance tomorrow!")
 
 
 def resolve_duels(c):
@@ -640,7 +858,7 @@ def api_today(c):
         banners.append({"kind": "fresh", "text": "🆕 New week. League reset. Everyone starts from zero — including the person ahead of you."})
     live = []
     if u["crew_id"]:
-        live = q(c.conn, """SELECT us.display, us.emoji, tm.subject, tm.started FROM timers tm JOIN users us ON us.id=tm.user_id
+        live = q(c.conn, """SELECT us.display, us.emoji, tm.subject, tm.started, tm.mode FROM timers tm JOIN users us ON us.id=tm.user_id
             WHERE us.crew_id=? AND us.id<>?""", (u["crew_id"], uid))
         for l in live:
             l["elapsed"] = int(time.time() - l.pop("started"))
@@ -650,6 +868,37 @@ def api_today(c):
             exams.append({**e, "days_left": (pd(e["date"]) - t).days})
         except Exception:
             pass
+    
+    # Rival info for today screen
+    rival_info = None
+    boss_info = None
+    if u["crew_id"]:
+        crew = q1(c.conn, "SELECT * FROM crews WHERE id=?", (u["crew_id"],))
+        if crew:
+            mem = q(c.conn, "SELECT id FROM users WHERE crew_id=?", (crew["id"],))
+            if len(mem) >= 2:
+                ws = wstart(t)
+                # Get week XP for all members
+                week_xp = {}
+                for m in mem:
+                    week_xp[m["id"]] = c.conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp WHERE user_id=? AND day>=? AND day<>'0000-00-00'", (m["id"], iso(ws))).fetchone()[0]
+                sorted_mem = sorted(mem, key=lambda m: week_xp[m["id"]], reverse=True)
+                me_i = next(i for i, m in enumerate(sorted_mem) if m["id"] == uid)
+                if me_i > 0:
+                    rival = q1(c.conn, "SELECT display, emoji FROM users WHERE id=?", (sorted_mem[me_i - 1]["id"],))
+                    rival_info = {"name": rival["display"], "emoji": rival["emoji"], "gap": week_xp[sorted_mem[me_i - 1]["id"]] - week_xp[uid]}
+                elif len(sorted_mem) > 1:
+                    rival = q1(c.conn, "SELECT display, emoji FROM users WHERE id=?", (sorted_mem[1]["id"],))
+                    rival_info = {"name": rival["display"], "emoji": rival["emoji"], "gap": week_xp[uid] - week_xp[sorted_mem[1]["id"]], "dir": "behind"}
+                
+                # Boss battle status
+                boss = q1(c.conn, "SELECT * FROM boss_battles WHERE crew_id=? AND day=?", (crew["id"], ts))
+                if boss:
+                    boss_info = {"passed": bool(boss["passed"]), "target": boss["target_min"], "actual": boss["actual_min"]}
+                else:
+                    today_timer = sum(c.conn.execute("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day=? AND kind='timer'", (m["id"], ts)).fetchone()[0] for m in mem)
+                    boss_info = {"passed": None, "target": len(mem) * 150, "actual": today_timer}
+    
     return {
         "day": ts, "user": public_user(u), "level": level_info(total_xp(c.conn, uid)),
         "xp_today": c.conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp WHERE user_id=? AND day=?", (uid, ts)).fetchone()[0],
@@ -661,6 +910,7 @@ def api_today(c):
         "banners": banners, "live": live, "exams": exams,
         "sessions": q(c.conn, "SELECT id, subject, minutes, kind, hour FROM focus WHERE user_id=? AND day=? ORDER BY id DESC", (uid, ts)),
         "reflected": bool(q1(c.conn, "SELECT id FROM reflections WHERE user_id=? AND day=?", (uid, ts))),
+        "rival": rival_info, "boss": boss_info,
     }
 
 
@@ -669,6 +919,9 @@ def log_focus(c, subject, minutes, kind, distractions=0, note="", started=None):
     u = c.user
     started = started or now()
     day = iso(today())
+    prev_self = c.conn.execute("SELECT COALESCE(MAX(minutes),0) FROM focus WHERE user_id=? AND kind='timer'", (u["id"],)).fetchone()[0]
+    prev_crew = c.conn.execute("SELECT COALESCE(MAX(f.minutes),0) FROM focus f JOIN users x ON x.id=f.user_id WHERE x.crew_id=? AND f.kind='timer'",
+                               (u["crew_id"],)).fetchone()[0] if u["crew_id"] else 0
     cur = c.conn.execute("INSERT INTO focus(user_id,day,subject,minutes,kind,distractions,note,started_at,hour) VALUES(?,?,?,?,?,?,?,?,?)",
                          (u["id"], day, subject, minutes, kind, distractions, note, started.isoformat(timespec="seconds"), started.hour))
     fid = cur.lastrowid
@@ -678,7 +931,16 @@ def log_focus(c, subject, minutes, kind, distractions=0, note="", started=None):
         award(c, f"deep:{fid}", 20, "Deep block bonus")
     if kind == "timer" and minutes >= 25 and distractions == 0:
         award(c, f"clean:{fid}", 10, "Clean run: zero distractions")
-    if minutes >= 25:
+    if kind == "timer" and minutes >= 120:
+        award(c, f"marathon:{fid}", 40, "Marathon bonus: 2h+ in one sitting")
+    rec = None
+    if kind == "timer" and minutes >= 45 and prev_crew and minutes > prev_crew:
+        rec = f"broke the crew record: {minutes} min in one sitting 👑"
+    elif kind == "timer" and minutes >= 30 and prev_self and minutes > prev_self:
+        rec = f"set a new personal best: {minutes} min in one sitting 🏅"
+    if rec:
+        feed(c, "record", rec)
+    elif minutes >= 25:
         feed(c, "session", f"locked in {minutes} min of {subject}" + (" ✍️ (manual)" if kind != "timer" else ""))
     evaluate(c)
     return {"ok": True, "minutes": minutes, "id": fid}
@@ -689,17 +951,20 @@ def timer_start(c):
     sub = need(c, "subject")
     if sub not in SUBJECTS:
         raise ApiError("bad subject")
-    target = max(5, min(180, need(c, "target", int, 25)))
+    mode = str(c.body.get("mode", "timer"))
+    if mode not in ("timer", "stopwatch"):
+        raise ApiError("bad mode")
+    target = 0 if mode == "stopwatch" else max(5, min(180, need(c, "target", int, 25)))
     if q1(c.conn, "SELECT 1 x FROM timers WHERE user_id=?", (c.user["id"],)):
         raise ApiError("A timer is already running")
-    c.conn.execute("INSERT INTO timers(user_id,subject,started,target) VALUES(?,?,?,?)", (c.user["id"], sub, time.time(), target))
+    c.conn.execute("INSERT INTO timers(user_id,subject,started,target,mode) VALUES(?,?,?,?,?)", (c.user["id"], sub, time.time(), target, mode))
     return {"ok": True}
 
 
 @route("POST", "/api/timer/extend")
 def timer_extend(c):
     add = max(5, min(60, need(c, "add", int, 20)))
-    c.conn.execute("UPDATE timers SET target=target+? WHERE user_id=?", (add, c.user["id"]))
+    c.conn.execute("UPDATE timers SET target=target+? WHERE user_id=? AND COALESCE(mode,'timer')='timer'", (add, c.user["id"]))
     return {"ok": True}
 
 
@@ -718,11 +983,18 @@ def timer_stop(c):
     if c.body.get("discard"):
         return {"ok": True, "discarded": True}
     elapsed = (time.time() - t["started"]) / 60.0
-    minutes = int(min(elapsed, t["target"] + 15, 240))  # forgot to stop? you only get target+15
+    stopwatch = (t.get("mode") or "timer") == "stopwatch"
+    if stopwatch:
+        minutes = int(min(elapsed, STOPWATCH_CAP))  # open-ended, but capped so a forgotten stopwatch can't farm XP
+    else:
+        minutes = int(min(elapsed, t["target"] + 15, 240))  # forgot to stop? you only get target+15
     if minutes < 5:
         return {"ok": True, "too_short": True, "minutes": minutes}
     note = str(c.body.get("note", ""))[:200]
-    return log_focus(c, t["subject"], minutes, "timer", t["distractions"], note, dt.datetime.fromtimestamp(t["started"]))
+    res = log_focus(c, t["subject"], minutes, "timer", t["distractions"], note, dt.datetime.fromtimestamp(t["started"]))
+    if stopwatch and elapsed > STOPWATCH_CAP:
+        res["capped"] = STOPWATCH_CAP
+    return res
 
 
 @route("POST", "/api/focus")
@@ -969,11 +1241,20 @@ def api_crew(c):
         wm = c.conn.execute("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day>=?", (mu["id"], iso(ws))).fetchone()[0]
         lw = c.conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp WHERE user_id=? AND day>=? AND day<?", (mu["id"], iso(ws - D(7)), iso(ws))).fetchone()[0]
         tx = total_xp(c.conn, mu["id"])
-        live = q1(c.conn, "SELECT subject, started FROM timers WHERE user_id=?", (mu["id"],))
+        mstart = iso(t.replace(day=1))
+        one = lambda sql, *a: c.conn.execute(sql, (mu["id"],) + a).fetchone()[0]
+        extra = {"month_xp": one("SELECT COALESCE(SUM(amount),0) FROM xp WHERE user_id=? AND day>=? AND day<>'0000-00-00'", mstart),
+                 "month_min": one("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day>=?", mstart),
+                 "all_xp": tx, "all_min": one("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=?"),
+                 "best_session": one("SELECT COALESCE(MAX(minutes),0) FROM focus WHERE user_id=? AND kind='timer'"),
+                 "best_day": one("SELECT COALESCE(MAX(s),0) FROM (SELECT SUM(minutes) s FROM focus WHERE user_id=? GROUP BY day)"),
+                 "deep": one("SELECT COUNT(*) FROM focus WHERE user_id=? AND kind='timer' AND minutes>=50"),
+                 "longest": mu["longest"]}
+        live = q1(c.conn, "SELECT subject, started, mode FROM timers WHERE user_id=?", (mu["id"],))
         out.append({"id": mu["id"], "display": mu["display"], "emoji": mu["emoji"], "color": mu["color"], "me": mu["id"] == u["id"],
                     "identity": mu["identity"], "week_xp": wk, "last_week_xp": lw, "week_min": wm, "today_min": st["total"],
-                    "streak": sv["now"], "qualified": sv["qualified"], "level": level_info(tx),
-                    "live": {"subject": live["subject"], "elapsed": int(time.time() - live["started"])} if live else None})
+                    "streak": sv["now"], "qualified": sv["qualified"], "level": level_info(tx), **extra,
+                    "live": {"subject": live["subject"], "elapsed": int(time.time() - live["started"]), "mode": live["mode"] or "timer"} if live else None})
     out.sort(key=lambda x: -x["week_xp"])
     for i, m in enumerate(out):
         m["rank"] = i + 1
@@ -983,10 +1264,48 @@ def api_crew(c):
         rival = {"name": out[me_i - 1]["display"], "gap": out[me_i - 1]["week_xp"] - out[me_i]["week_xp"], "dir": "ahead"}
     elif len(out) > 1:
         rival = {"name": out[1]["display"], "gap": out[0]["week_xp"] - out[1]["week_xp"], "dir": "behind"}
+    ids = [m["id"] for m in out]
+    ph = ",".join("?" * len(ids))
+    hall = []  # weekly champions, newest first (last 6 finished weeks)
+    for k in range(1, 7):
+        a, b = ws - D(7 * k), ws - D(7 * (k - 1))
+        r = q1(c.conn, f"SELECT user_id, SUM(amount) x FROM xp WHERE day>=? AND day<? AND user_id IN ({ph}) GROUP BY user_id ORDER BY x DESC LIMIT 1",
+               (iso(a), iso(b), *ids))
+        if r and r["x"] > 0:
+            w = next(m for m in out if m["id"] == r["user_id"])
+            hall.append({"week": iso(a), "uid": w["id"], "name": w["display"], "emoji": w["emoji"], "xp": r["x"]})
+    for m in out:
+        m["crowns"] = sum(1 for h in hall if h["uid"] == m["id"])
+    records = []
+    for key, label, unit in (("best_session", "Longest single sitting", "min"), ("best_day", "Biggest single day", "min"),
+                             ("longest", "Longest streak", "days"), ("deep", "Most deep blocks", "blocks")):
+        top = max(out, key=lambda m: m[key])
+        if top[key] > 0:
+            records.append({"k": key, "label": label, "unit": unit, "value": top[key], "name": top["display"], "emoji": top["emoji"], "me": top["me"]})
     goal_min = crew["goal_h"] * 60 * len(out)
     nudged = {r["to_id"] for r in q(c.conn, "SELECT to_id FROM nudges WHERE from_id=? AND day=?", (u["id"], ts))}
     for m in out:
         m["nudged"] = m["id"] in nudged
+    
+    # Boss battle status for today
+    boss = q1(c.conn, "SELECT * FROM boss_battles WHERE crew_id=? AND day=?", (crew["id"], ts))
+    boss_status = None
+    if boss:
+        boss_status = {"passed": bool(boss["passed"]), "target": boss["target_min"], "actual": boss["actual_min"]}
+    else:
+        # Show upcoming target
+        boss_status = {"passed": None, "target": len(out) * 150, "actual": sum(m["today_min"] for m in out if m.get("today_min", 0) > 0)}
+    
+    # Weekly crown holder (last completed week)
+    ws = wstart(t)
+    last_week = ws - D(7)
+    crown = q1(c.conn, f"SELECT user_id, SUM(amount) x FROM xp WHERE day>=? AND day<? AND user_id IN ({ph}) GROUP BY user_id ORDER BY x DESC LIMIT 1",
+               (iso(last_week), iso(ws), *ids))
+    crown_holder = None
+    if crown and crown["x"] > 0:
+        w = next(m for m in out if m["id"] == crown["user_id"])
+        crown_holder = {"name": w["display"], "emoji": w["emoji"], "xp": crown["x"]}
+    
     fd = q(c.conn, """SELECT f.id, f.ts, f.kind, f.text, us.display, us.emoji, us.color, f.user_id FROM feed f JOIN users us ON us.id=f.user_id
         WHERE f.crew_id=? ORDER BY f.id DESC LIMIT 40""", (crew["id"],))
     for f in fd:
@@ -1001,7 +1320,8 @@ def api_crew(c):
             for k in ("a", "b"):
                 d[k + "_min"] = c.conn.execute("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day BETWEEN ? AND ?", (d[k], d["start"], d["end"])).fetchone()[0]
     return {"crew": {"name": crew["name"], "code": crew["code"], "goal_h": crew["goal_h"]}, "members": out, "rival": rival,
-            "team": {"minutes": sum(m["week_min"] for m in out), "goal": int(goal_min)}, "feed": fd, "duels": duels, "me": u["id"]}
+            "team": {"minutes": sum(m["week_min"] for m in out), "goal": int(goal_min)}, "feed": fd, "duels": duels, "me": u["id"], "hall": hall, "records": records,
+            "boss": boss_status, "crown": crown_holder}
 
 
 @route("POST", "/api/react")
@@ -1227,7 +1547,7 @@ def api_insights(c):
     urg = q(c.conn, "SELECT trigger, COUNT(*) n FROM urges WHERE user_id=? AND trigger<>'' GROUP BY trigger ORDER BY n DESC LIMIT 4", (uid,))
     badges = {r["id"]: r["day"] for r in q(c.conn, "SELECT id, day FROM badges WHERE user_id=?", (uid,))}
     qdays = sum(1 for h in heat if h["q"])
-    return {"heat": heat, "hours": hours, "weeks": weeks, "ghost": ghost, "cum": cum, "outgrow": {"ratio": round(ratio, 2), "last7": last7, "baseline_h": u["baseline_h"]},
+    return {"ladder": [{"level": l, "rank": n, "emoji": e} for l, n, e in RANKS], "heat": heat, "hours": hours, "weeks": weeks, "ghost": ghost, "cum": cum, "outgrow": {"ratio": round(ratio, 2), "last7": last7, "baseline_h": u["baseline_h"]},
             "sub7": sub7, "chapters": {"total": ch["n"], "learned": ch["l"] or 0, "mastered": ch["mst"] or 0, "rate": rate, "left": left},
             "exams": exams, "mood": list(reversed(mood)), "urge_triggers": urg,
             "evidence": {"hours": round(s["minutes"] / 60, 1), "sessions": s["sessions"], "deep": s["deep"], "longest": max(u["longest"], u["run"]),
@@ -1308,15 +1628,78 @@ def chat_people(conn, crew_id):
             for r in q(conn, "SELECT id, display, emoji, color FROM users WHERE crew_id=?", (crew_id,))}
 
 
-def chat_msg(m):
-    return {"id": m["id"], "uid": m["sender"], "ts": m["ts"], "text": m["body"]}
+CHAT_EMOJIS = ["🔥", "💀", "😂", "👍", "❤️", "🫡", "💯"]
+CHAT_EDIT_WINDOW = 30 * 60  # seconds you can edit your own message
+
+
+def chat_clean(raw):
+    text = str(raw or "")[:CHAT_MAX * 3].replace("\r\n", "\n")
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    if not text:
+        raise ApiError("Say something first")
+    if len(text) > CHAT_MAX:
+        raise ApiError(f"Max {CHAT_MAX} characters")
+    return text
+
+
+def chat_reacts(conn, ids, uid):
+    """({msg_id: {emoji: n}}, {msg_id: my emoji})"""
+    re_, mine = {}, {}
+    if ids:
+        for r in q(conn, f"SELECT msg_id, emoji, user_id FROM msg_reacts WHERE msg_id IN ({','.join('?' * len(ids))})", list(ids)):
+            d = re_.setdefault(r["msg_id"], {})
+            d[r["emoji"]] = d.get(r["emoji"], 0) + 1
+            if r["user_id"] == uid:
+                mine[r["msg_id"]] = r["emoji"]
+    return re_, mine
+
+
+def chat_pack(conn, rows, uid):
+    """DB rows -> what the client renders (adds reply preview, edited flag, reactions)."""
+    if not rows:
+        return []
+    re_, mine = chat_reacts(conn, [r["id"] for r in rows], uid)
+    rids = list({r["reply_to"] for r in rows if r.get("reply_to")})
+    refs = {}
+    if rids:
+        refs = {r["id"]: r for r in q(conn, f"SELECT id, sender, body, deleted FROM messages WHERE id IN ({','.join('?' * len(rids))})", rids)}
+    out = []
+    for r in rows:
+        m = {"id": r["id"], "uid": r["sender"], "ts": r["ts"], "text": r["body"], "edited": bool(r.get("edited"))}
+        if r["id"] in re_:
+            m["re"] = re_[r["id"]]
+        if r["id"] in mine:
+            m["mine"] = mine[r["id"]]
+        rf = refs.get(r.get("reply_to"))
+        if rf:
+            m["reply"] = {"id": rf["id"], "uid": rf["sender"], "text": "deleted message" if rf["deleted"] else rf["body"][:90]}
+        out.append(m)
+    return out
+
+
+def chat_states(conn, thread, first, uid):
+    """Current edit/reaction state of recent messages, so open chats update live without a reload."""
+    rows = q(conn, "SELECT id, body, edited FROM messages WHERE thread=? AND id>=? AND deleted=0 ORDER BY id DESC LIMIT 150", (thread, first))
+    re_, mine = chat_reacts(conn, [r["id"] for r in rows], uid)
+    out = {}
+    for r in rows:
+        st = {}
+        if r["edited"]:
+            st["ed"], st["t"] = 1, r["body"]
+        if r["id"] in re_:
+            st["re"] = re_[r["id"]]
+        if r["id"] in mine:
+            st["mine"] = mine[r["id"]]
+        out[r["id"]] = st
+    return out
 
 
 def chat_fetch(conn, thread, after=0, before=0, limit=60):
     if after:
-        rows = q(conn, "SELECT id,sender,ts,body FROM messages WHERE thread=? AND id>? AND deleted=0 ORDER BY id LIMIT 200", (thread, after))
+        rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE thread=? AND id>? AND deleted=0 ORDER BY id LIMIT 200", (thread, after))
         return rows, False
-    rows = q(conn, "SELECT id,sender,ts,body FROM messages WHERE thread=? AND id<? AND deleted=0 ORDER BY id DESC LIMIT ?",
+    rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE thread=? AND id<? AND deleted=0 ORDER BY id DESC LIMIT ?",
              (thread, before or 2 ** 62, limit + 1))
     return rows[:limit][::-1], len(rows) > limit
 
@@ -1363,7 +1746,8 @@ def chat_messages(c):
     if first:
         deleted = [r["id"] for r in q(c.conn, "SELECT id FROM messages WHERE thread=? AND deleted=1 AND id>=? ORDER BY id DESC LIMIT 100", (thread, first))]
     unread = chat_unread(c.conn, u)
-    return {"messages": [chat_msg(m) for m in rows], "more": more, "deleted": deleted, "seq": CHAT_SEQ,
+    return {"messages": chat_pack(c.conn, rows, u["id"]), "more": more, "deleted": deleted, "seq": CHAT_SEQ,
+            "states": chat_states(c.conn, thread, first, u["id"]) if first else {},
             "people": chat_people(c.conn, u["crew_id"]), "unread": unread, "total": sum(unread.values())}
 
 
@@ -1371,24 +1755,63 @@ def chat_messages(c):
 def chat_send(c):
     u = c.user
     thread, other = chat_thread(c, str(c.body.get("thread", "")))
-    text = str(c.body.get("text", ""))[:CHAT_MAX * 3].replace("\r\n", "\n")
-    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text).strip()
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    if not text:
-        raise ApiError("Say something first")
-    if len(text) > CHAT_MAX:
-        raise ApiError(f"Max {CHAT_MAX} characters")
+    text = chat_clean(c.body.get("text"))
     recent = [t for t in CHAT_RATE.get(u["id"], []) if time.time() - t < 20]
     if len(recent) >= 10:
         raise ApiError("Slow down 😅", 429)
     CHAT_RATE[u["id"]] = recent + [time.time()]
+    reply_to = None
+    try:
+        rid = int(c.body.get("reply_to") or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    if rid and q1(c.conn, "SELECT 1 x FROM messages WHERE id=? AND thread=? AND deleted=0", (rid, thread)):
+        reply_to = rid
     ts = now().isoformat(timespec="seconds")
-    cur = c.conn.execute("INSERT INTO messages(thread,sender,recip,ts,body) VALUES(?,?,?,?,?)",
-                         (thread, u["id"], other["id"] if other else None, ts, text))
+    cur = c.conn.execute("INSERT INTO messages(thread,sender,recip,ts,body,reply_to) VALUES(?,?,?,?,?,?)",
+                         (thread, u["id"], other["id"] if other else None, ts, text, reply_to))
     chat_mark(c.conn, u["id"], thread, cur.lastrowid)
+    row = q1(c.conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE id=?", (cur.lastrowid,))
+    msg = chat_pack(c.conn, [row], u["id"])[0]
     c.conn.commit()  # visible to waiting pollers before we wake them
     chat_bump()
-    return {"message": {"id": cur.lastrowid, "uid": u["id"], "ts": ts, "text": text}}
+    return {"message": msg}
+
+
+@route("POST", "/api/chat/edit")
+def chat_edit(c):
+    m = q1(c.conn, "SELECT id, sender, ts, deleted FROM messages WHERE id=?", (need(c, "id", int),))
+    if not m or m["deleted"] or m["sender"] != c.user["id"]:
+        raise ApiError("You can only edit your own messages", 403)
+    if (now() - dt.datetime.fromisoformat(m["ts"])).total_seconds() > CHAT_EDIT_WINDOW:
+        raise ApiError("Too late to edit (30 min window)")
+    text = chat_clean(c.body.get("text"))
+    c.conn.execute("UPDATE messages SET body=?, edited=1 WHERE id=?", (text, m["id"]))
+    c.conn.commit()
+    chat_bump()
+    return {"ok": True, "text": text}
+
+
+@route("POST", "/api/chat/react")
+def chat_react(c):
+    u = c.user
+    e = str(c.body.get("emoji", ""))
+    if e not in CHAT_EMOJIS:
+        raise ApiError("bad emoji")
+    m = q1(c.conn, "SELECT id, thread, sender, recip, deleted FROM messages WHERE id=?", (need(c, "id", int),))
+    if not m or m["deleted"]:
+        raise ApiError("No such message", 404)
+    ok = (m["thread"] == f"crew:{u['crew_id']}") if m["thread"].startswith("crew:") else (u["id"] in (m["sender"], m["recip"]))
+    if not ok:
+        raise ApiError("No such message", 404)
+    cur = q1(c.conn, "SELECT emoji FROM msg_reacts WHERE msg_id=? AND user_id=?", (m["id"], u["id"]))
+    if cur and cur["emoji"] == e:
+        c.conn.execute("DELETE FROM msg_reacts WHERE msg_id=? AND user_id=?", (m["id"], u["id"]))
+    else:
+        c.conn.execute("INSERT OR REPLACE INTO msg_reacts(msg_id,user_id,emoji) VALUES(?,?,?)", (m["id"], u["id"], e))
+    c.conn.commit()
+    chat_bump()
+    return {"ok": True}
 
 
 @route("POST", "/api/chat/delete")
@@ -1510,12 +1933,12 @@ def admin_backup(c):
             data = f.read()
     finally:
         os.unlink(tmp)
-    return (data, f"outgrow-{now().strftime('%Y%m%d-%H%M')}.db", "application/octet-stream")
+    return (data, f"ragdamaxing-{now().strftime('%Y%m%d-%H%M')}.db", "application/octet-stream")
 
 
 # ----------------------------------------------------------------------------- http
 class Handler(BaseHTTPRequestHandler):
-    server_version = "Outgrow/3"
+    server_version = "Ragdamaxing/4"
     timeout = 30
 
     def log_message(self, *a):
@@ -1556,7 +1979,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", ""):
             path = "/index.html"
         fp = os.path.normpath(os.path.join(STATIC, path.lstrip("/")))
-        if not fp.startswith(STATIC) or not os.path.isfile(fp):
+        if not (fp == STATIC or fp.startswith(STATIC + os.sep)) or not os.path.isfile(fp):
             fp = os.path.join(STATIC, "index.html")
         ctype = mimetypes.guess_type(fp)[0] or "application/octet-stream"
         with open(fp, "rb") as f:
@@ -1602,13 +2025,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(401, {"error": "login"})
             c = Ctx(conn, user, body, parse_qs(p.query), self)
             before = level_of(total_xp(conn, user["id"])) if user and method == "POST" else None
+            before_rank = level_info(total_xp(conn, user["id"]))["rank"] if before is not None else None
             res = fn(c)
             if before is not None and c.user:
                 after = level_of(total_xp(conn, c.user["id"]))
                 if after > before:
                     li = level_info(total_xp(conn, c.user["id"]))
-                    c.ev.append({"t": "levelup", "level": li["level"], "rank": li["rank"]})
-                    feed(c, "levelup", f"reached level {li['level']} · {li['rank']} ⬆️")
+                    new_title = li["rank"] != before_rank
+                    c.ev.append({"t": "levelup", "level": li["level"], "rank": li["rank"], "emoji": li["emoji"], "new_title": new_title})
+                    feed(c, "levelup", f"reached level {li['level']} · {li['emoji']} {li['rank']} ⬆️" + (" · NEW TITLE" if new_title else ""))
             conn.commit()
             if isinstance(res, tuple):
                 return self.send_file(*res)
@@ -1648,10 +2073,23 @@ def import_legacy(conn):
     print(f"  imported {n} rows of Season 0 history")
 
 
+def migrate(conn):
+    """Add columns to tables that already exist in older databases. Safe to run on every start."""
+    def cols(t):
+        return {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
+    for table, col, ddl in (("timers", "mode", "TEXT DEFAULT 'timer'"),
+                            ("messages", "reply_to", "INTEGER"),
+                            ("messages", "edited", "INTEGER DEFAULT 0")):
+        if col not in cols(table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    conn.commit()
+
+
 def bootstrap():
     os.makedirs(DATA_DIR, exist_ok=True)
     conn = connect()
     conn.executescript(SCHEMA)
+    migrate(conn)
     import_legacy(conn)
     if not conn.execute("SELECT COUNT(*) FROM crews").fetchone()[0]:
         code = make_code()
@@ -1676,7 +2114,7 @@ class Server(ThreadingHTTPServer):
 
 if __name__ == "__main__":
     crew = bootstrap()
-    print(f"\n  OUTGROW  ·  http://{BIND}:{PORT}")
+    print(f"\n  RAGDAMAXING  ·  http://{BIND}:{PORT}")
     print(f"  Crew: {crew['name']}   Invite code: {crew['code']}")
     print(f"  Server time: {now().isoformat(timespec='seconds')} ({time.strftime('%Z %z')})   admins: {', '.join(sorted(ADMINS)) or 'none'}\n", flush=True)
     Server((BIND, PORT), Handler).serve_forever()

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Expose OUTGROW to friends anywhere, with a public https link. Ctrl+C to stop sharing.
+# Expose RAGDAMAXING to friends anywhere, with a public https link. Ctrl+C to stop sharing.
 # Picks the first thing available: cloudflared -> tailscale funnel -> ssh tunnel (no install needed).
 PORT=${PORT:-8765}
 if command -v cloudflared >/dev/null; then

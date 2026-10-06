@@ -1,6 +1,0 @@
-[Unit]
-Description=Pull the latest OUTGROW from GitHub (rolls back if it won't start)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/lib/outgrow/update.sh

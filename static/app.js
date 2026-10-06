@@ -1,11 +1,11 @@
 'use strict';
-/* OUTGROW front-end. Vanilla JS, no build step. */
+/* RAGDAMAXING front-end. Vanilla JS, no build step. */
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fm = m => { m = Math.round(m || 0); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`; };
 const SUBS = ['Physics', 'Chemistry', 'Maths', 'English', 'Other'];
 const SCOL = { Physics: '#3ea6ff', Chemistry: '#22d3a6', Maths: '#ffb020', English: '#ff5c8a', Other: '#9aa0b4' };
-const S = { tab: 'today', sub: 'chapters', user: null, today: null, crew: null, syl: null, tests: null, ins: null, refl: null, weekly: null, pickSub: 'Physics', pickDur: 25, authMode: 'login', t0: 0, beeped: false, urge: null };
+const S = { tab: 'today', sub: 'chapters', user: null, today: null, crew: null, syl: null, tests: null, ins: null, refl: null, weekly: null, pickSub: 'Physics', pickDur: 25, pickMode: 'timer', crewPeriod: 'week', sw: null, authMode: 'login', t0: 0, beeped: false, urge: null };
 
 /* ---------- api ---------- */
 async function api(path, body) {
@@ -42,7 +42,7 @@ function handleEvents(evs) {
   if (xp.length) { const sum = xp.reduce((a, e) => a + e.amount, 0); toast(`+${sum} XP`, xp.slice(0, 3).map(e => e.label).join(' · ')); }
   evs.filter(e => e.t === 'badge').forEach(e => { toast(`${e.emoji} ${e.name}`, e.desc, 'badge'); confetti(); });
   const lu = evs.find(e => e.t === 'levelup');
-  if (lu) { confetti(); modal(`<div class="c"><div class="big">LEVEL ${lu.level}</div><h2 style="color:var(--acc2)">${esc(lu.rank)}</h2><p class="mut">Another vote for the person you're becoming.</p><button class="btn-p btn-xl" data-act="closeModal">Keep going</button></div>`); }
+  if (lu) { confetti(); modal(`<div class="c"><div class="big">LEVEL ${lu.level}</div><div style="font-size:54px;margin:6px 0">${lu.emoji || ''}</div><h2 style="color:var(--acc2)">${esc(lu.rank)}</h2>${lu.new_title ? '<div class="pill" style="display:inline-block;margin:6px 0">NEW TITLE UNLOCKED</div>' : ''}<p class="mut">Another vote for the person you're becoming.</p><button class="btn-p btn-xl" data-act="closeModal">Keep going</button></div>`); }
 }
 function modal(html) { const m = $('#modal'); m.innerHTML = `<div>${html}</div>`; m.classList.remove('hidden'); }
 function closeModal() { $('#modal').classList.add('hidden'); $('#modal').innerHTML = ''; }
@@ -63,8 +63,8 @@ function lines(series, h = 60) {
 /* ---------- auth ---------- */
 function renderAuth() {
   const reg = S.authMode === 'register';
-  $('#app').innerHTML = `<div class="auth"><div class="logo">OUTGROW</div>
-  <p class="mut">The old you was an A+ student. The next one outgrows them. Track it. Prove it. Together.</p>
+  $('#app').innerHTML = `<div class="auth"><div class="logo">RAGDAMAXING</div>
+  <p class="mut">The old you was an A+ student. The new you ragdamaxes. Track it. Prove it. Together.</p>
   <div class="card col">
     <input id="a_user" placeholder="Username" autocapitalize="off" autocomplete="username">
     <input id="a_pin" type="password" placeholder="PIN / password (4+ chars)" autocomplete="${reg ? 'new-password' : 'current-password'}">
@@ -106,7 +106,7 @@ function render() {
   nav.innerHTML = '<div>' + tabs.map(t => `<button class="${S.tab === t[0] ? 'on' : ''}" data-act="tab" data-v="${t[0]}"><span>${t[1]}</span>${t[2]}${t[0] === 'chat' && CH.total ? `<i class="nb">${CH.total > 9 ? '9+' : CH.total}</i>` : ''}</button>`).join('') + '</div>';
   document.body.appendChild(nav);
   if (S.tab === 'chat') chatAfterRender();
-  if (S.tab === 'today' && S.today?.timer) { S.t0 = Date.now() - S.today.timer.elapsed * 1000; S.beeped = S.today.timer.elapsed >= S.today.timer.target * 60; tick(); }
+  if (S.tab === 'today' && S.today?.timer) { S.t0 = Date.now() - S.today.timer.elapsed * 1000; S.beeped = S.today.timer.elapsed >= S.today.timer.target * 60; const m0 = Math.floor(S.today.timer.elapsed / 60); S.sw = [25, 50, 120, 180].filter(x => m0 >= x).pop() || null; tick(); }
 }
 
 /* ---------- TODAY ---------- */
@@ -114,27 +114,61 @@ function vToday() {
   const T = S.today, L = T.level, sv = T.streak, u = T.user;
   const floor = T.daily_min, stretch = Math.max(T.stretch_min, floor * 2), m = T.today.total;
   const ex = T.exams[0];
-  let h = `<div class="card glow"><div class="row between"><div><div class="xs mut">${esc(u.emoji)} ${esc(u.display)} · LEVEL ${L.level}</div><h2 style="font-size:22px">${esc(L.rank)}</h2></div>
+  
+  // Rival banner
+  let rivalBanner = '';
+  if (T.rival) {
+    const ahead = !T.rival.dir;
+    rivalBanner = `<div class="banner rival ${ahead ? 'ahead' : 'behind'}">
+      ${ahead ? '🎯' : '🛡️'} <b>${esc(T.rival.name)}</b> ${T.rival.emoji} is <b>${T.rival.gap} XP</b> ${ahead ? 'ahead' : 'behind'} you this week.
+      ${ahead ? 'One deep block closes the gap.' : "Don't coast — they're coming for you."}
+    </div>`;
+  }
+  
+  // Boss battle banner
+  let bossBanner = '';
+  if (T.boss) {
+    const pct = Math.min(T.boss.actual / Math.max(T.boss.target, 1) * 100, 100);
+    if (T.boss.passed === true) {
+      bossBanner = `<div class="banner boss win">👹 <b>BOSS DEFEATED!</b> Crew hit ${fm(T.boss.actual)} / ${fm(T.boss.target)} — everyone got +50 XP!</div>`;
+    } else if (T.boss.passed === false) {
+      bossBanner = `<div class="banner boss fail">💀 <b>Boss Battle Failed.</b> Crew hit ${fm(T.boss.actual)} / ${fm(T.boss.target)}. Tomorrow is another chance.</div>`;
+    } else {
+      bossBanner = `<div class="banner boss active"><b>👹 DAILY BOSS BATTLE</b> · Crew target: ${fm(T.boss.target)} · Current: ${fm(T.boss.actual)} (${pct}%)
+        <div class="bar" style="margin:8px 0 0"><i style="width:${pct}%"></i></div>
+        <span class="xs mut">Verified timer minutes only. Everyone in crew must contribute.</span>
+      </div>`;
+    }
+  }
+  
+  let h = `<div class="card glow"><div class="row between"><div><div class="xs mut">${esc(u.emoji)} ${esc(u.display)} · LEVEL ${L.level}</div><h2 style="font-size:22px">${L.emoji} ${esc(L.rank)}</h2></div>
     <div class="c"><div style="font-size:30px">${sv.at_risk ? '⏳' : '🔥'}</div><div class="b">${sv.now}</div><div class="xs mut">day streak</div></div></div>
     <div class="bar" style="margin:10px 0 4px"><i style="width:${L.pct}%"></i></div>
-    <div class="row between xs mut"><span>${L.xp - L.lo} / ${L.hi - L.lo} XP to next level</span><span>❄️ ${sv.freezes} freeze${sv.freezes === 1 ? '' : 's'} · +${T.xp_today} XP today</span></div>
+    <div class="row between xs mut"><span>${L.xp - L.lo} / ${L.hi - L.lo} XP to next level</span><span>❄️ ${sv.freezes} freeze${sv.freezes === 1 ? '' : 's'} · +${T.xp_today} XP today</span></div>${L.next_rank ? `<div class="xs mut" style="margin-top:4px">Next title · Lv ${L.next_at}: ${L.next_emoji} ${esc(L.next_rank)}</div>` : ''}
     ${u.identity ? `<div class="quote">I am ${esc(u.identity)}</div>` : ''}
     ${ex ? `<div class="row wrap" style="gap:6px;margin-top:4px">${T.exams.map(e => `<span class="pill">${esc(e.name)} · ${e.days_left}d</span>`).join('')}</div>` : ''}</div>`;
+  
   T.banners.forEach(b => h += `<div class="banner ${b.kind}">${esc(b.text)}</div>`);
-  if (T.live.length) h += `<div class="live-strip"><span class="dot live"></span> <b>${T.live.map(l => `${esc(l.display)} (${esc(l.subject)} · ${fm(l.elapsed / 60)})`).join(', ')}</b> ${T.live.length > 1 ? 'are' : 'is'} locked in right now.${T.timer ? '' : ' Join them — start a block.'}</div>`;
+  
+  // Add rival and boss banners
+  if (rivalBanner) h += rivalBanner;
+  if (bossBanner) h += bossBanner;
+  
+  if (T.live.length) h += `<div class="live-strip"><span class="dot live"></span> <b>${T.live.map(l => `${esc(l.display)} (${l.mode === 'stopwatch' ? '⏱ ' : ''}${esc(l.subject)} · ${fm(l.elapsed / 60)})`).join(', ')}</b> ${T.live.length > 1 ? 'are' : 'is'} locked in right now.${T.timer ? '' : ' Join them — start a block.'}</div>`;
   /* focus card */
   if (T.timer) {
     const tm = T.timer;
-    h += `<div class="card glow c"><h3>${esc(tm.subject)} · ${tm.target} min block</h3>
+    h += `<div class="card glow c"><h3>${esc(tm.subject)} · ${tm.mode === 'stopwatch' ? '⏱ stopwatch' : tm.target + ' min block'}</h3>
       <div class="ring"><svg width="210" height="210" viewBox="0 0 210 210"><circle cx="105" cy="105" r="94" stroke="#222234" stroke-width="12" fill="none"/><circle id="ringc" cx="105" cy="105" r="94" stroke="${SCOL[tm.subject]}" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="590.6" stroke-dashoffset="590.6"/></svg>
       <div class="in"><div class="clock" id="clock" style="font-size:52px">--:--</div><div class="xs mut" id="tsub"></div></div></div>
       <div class="row wrap" style="justify-content:center;margin-top:6px"><button data-act="distract">😵 Lost focus (<span id="dcount">${tm.distractions}</span>)</button></div>
-      <p class="xs mut" id="tmsg">Phone away. One tab. Pen in hand.</p>
+      <p class="xs mut" id="tmsg">${tm.mode === 'stopwatch' ? 'Open-ended. Go as long as you can, every minute is XP. (4h max per session)' : 'Phone away. One tab. Pen in hand.'}</p>
       <div class="row"><button class="btn-g grow" data-act="stopTimer">✅ Finish & log</button><button class="btn-d" data-act="discard">Discard</button></div></div>`;
   } else {
     h += `<div class="card"><h3>Start a focus block</h3><div class="row wrap" style="margin:10px 0">${SUBS.map(s => `<span class="chip ${S.pickSub === s ? 'on' : ''}" data-act="pickSub" data-v="${s}">${s}</span>`).join('')}</div>
-      <div class="row wrap" style="margin-bottom:12px">${[25, 50, 90].map(d => `<span class="chip ${S.pickDur === d ? 'on' : ''}" data-act="pickDur" data-v="${d}">${d} min</span>`).join('')}</div>
-      <button class="btn-p btn-xl" data-act="startTimer">▶ START ${S.pickSub.toUpperCase()}</button>
+      <div class="row wrap" style="margin-bottom:10px">${[['timer', '⏳ Timer'], ['stopwatch', '⏱ Stopwatch']].map(([k, n]) => `<span class="chip ${S.pickMode === k ? 'on' : ''}" data-act="pickMode" data-v="${k}">${n}</span>`).join('')}</div>
+      ${S.pickMode === 'timer' ? `<div class="row wrap" style="margin-bottom:12px">${[25, 50, 90].map(d => `<span class="chip ${S.pickDur === d ? 'on' : ''}" data-act="pickDur" data-v="${d}">${d} min</span>`).join('')}</div>` : `<div class="xs mut" style="margin-bottom:12px">No countdown. Run it as long as you can, finish when you're done. 1 XP per minute, bonuses at 25 / 50 / 120 min. Counts as verified.</div>`}
+      <button class="btn-p btn-xl" data-act="startTimer">▶ START ${S.pickSub.toUpperCase()}${S.pickMode === 'stopwatch' ? ' · STOPWATCH' : ''}</button>
       <button class="btn-xl" style="margin-top:8px;padding:12px;font-size:15px" data-act="start5">😮‍💨 Can't start? Just 5 minutes. That's the deal.</button>
       <details><summary>Studied offline? Log it (counts half XP)</summary>
         <div class="row"><select id="mf_s">${SUBS.map(s => `<option ${s === S.pickSub ? 'selected' : ''}>${s}</option>`).join('')}</select><input id="mf_m" type="number" inputmode="numeric" placeholder="min" style="width:90px"><button data-act="manual">Log</button></div></details></div>`;
@@ -162,6 +196,16 @@ function tick() {
   const tm = S.today?.timer; if (!tm || S.tab !== 'today') return;
   const el = (Date.now() - S.t0) / 1000, tot = tm.target * 60, rem = tot - el;
   const c = $('#clock'); if (!c) return;
+  if (tm.mode === 'stopwatch') {
+    const hh = Math.floor(el / 3600), mi = Math.floor(el % 3600 / 60), se = Math.floor(el % 60), mins = Math.floor(el / 60);
+    c.textContent = (hh ? hh + ':' : '') + String(mi).padStart(2, '0') + ':' + String(se).padStart(2, '0');
+    $('#ringc').style.strokeDashoffset = 590.6 * (1 - (el % 3600) / 3600);
+    $('#tsub').textContent = `${mins} min · ~${mins} XP banked${mins >= 240 ? ' · 4h CAP, log it now' : ''}`;
+    const marks = [[25, 'Clean-run zone: zero distractions = +10 XP.'], [50, 'Deep block unlocked (+20 XP). Keep going.'], [120, 'MARATHON. +40 XP bonus locked in.'], [180, 'Ragda Beast territory. Drink water.']];
+    const hit = marks.filter(m => mins >= m[0]).pop();
+    if (hit && S.sw !== hit[0]) { S.sw = hit[0]; beep(); const t = $('#tmsg'); if (t) t.innerHTML = `<b>${hit[1]}</b>`; }
+    clearTimeout(S._tt); S._tt = setTimeout(tick, 500); return;
+  }
   const a = Math.abs(rem), mm = Math.floor(a / 60), ss = Math.floor(a % 60);
   c.textContent = (rem < 0 ? '+' : '') + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
   $('#ringc').style.strokeDashoffset = 590.6 * (1 - Math.min(el / tot, 1));
@@ -174,21 +218,49 @@ function tick() {
 }
 
 /* ---------- CREW ---------- */
+const PK = { week: ['week_xp', 'week_min'], month: ['month_xp', 'month_min'], all: ['all_xp', 'all_min'] };
+const pv = m => ({ xp: m[PK[S.crewPeriod][0]], min: m[PK[S.crewPeriod][1]] });
+const crewSorted = C => C.members.slice().sort((a, b) => pv(b).xp - pv(a).xp);
 function vCrew() {
   const C = S.crew;
   if (!C.crew) return `<div class="card"><h2>No crew yet</h2><p class="mut">Competition works. Join your friends.</p><input id="cj" placeholder="Invite code"><div style="height:8px"></div><button class="btn-p btn-xl" data-act="joinCrew">Join crew</button><div class="mut c sm" style="margin:10px 0">— or —</div><input id="cn" placeholder="New crew name"><div style="height:8px"></div><button class="btn-xl" data-act="createCrew">Create crew</button></div>`;
   const me = C.members.find(m => m.me);
   const tp = Math.min(C.team.minutes / Math.max(C.team.goal, 1) * 100, 100);
+  
+  // Crown holder display
+  let crownHtml = '';
+  if (C.crown) {
+    crownHtml = `<div class="crown-holder"><span class="crown-emoji">👑</span> <b>${esc(C.crown.name)}</b> ${C.crown.emoji} holds the crown this week with <b>${C.crown.xp} XP</b></div>`;
+  }
+  
   let h = `<div class="card glow"><div class="row between"><div><h2>${esc(C.crew.name)}</h2><div class="xs mut">Invite code: <b style="color:var(--acc2);letter-spacing:.15em" data-act="copy" data-v="${esc(C.crew.code)}">${esc(C.crew.code)}</b> (tap to copy)</div></div><div class="c"><div class="xs mut">YOUR RANK</div><div class="big" style="font-size:30px">#${me.rank}</div></div></div>
-    ${C.rival ? `<div class="sm" style="margin-top:8px">${C.rival.dir === 'ahead' ? `🎯 <b>${esc(C.rival.name)}</b> is <b>${C.rival.gap} XP</b> ahead of you this week. One deep block closes it.` : `🛡️ <b>${esc(C.rival.name)}</b> is only <b>${C.rival.gap} XP</b> behind. Don't coast.`}</div>` : ''}</div>`;
+    ${C.rival ? `<div class="sm" style="margin-top:8px">${C.rival.dir === 'ahead' ? `🎯 <b>${esc(C.rival.name)}</b> is <b>${C.rival.gap} XP</b> ahead of you this week. One deep block closes it.` : `🛡️ <b>${esc(C.rival.name)}</b> is only <b>${C.rival.gap} XP</b> behind. Don't coast.`}</div>` : ''}
+    ${crownHtml}</div>`;
   h += `<div class="card"><div class="row between"><h3>Crew weekly goal</h3><b>${fm(C.team.minutes)} / ${fm(C.team.goal)}</b></div><div class="bar o" style="margin:10px 0 4px"><i style="width:${tp}%"></i></div><div class="xs mut">Hit it together = +100 XP each (you must log 5h+ yourself to share the loot). Nobody free-rides.</div></div>`;
-  h += `<div class="card"><h3>This week's league</h3><table class="tbl">${C.members.map(m => {
+  
+  // Boss battle section
+  if (C.boss) {
+    const pct = Math.min(C.boss.actual / Math.max(C.boss.target, 1) * 100, 100);
+    let bossHtml = '';
+    if (C.boss.passed === true) {
+      bossHtml = `<div class="card glow"><h3>👹 DAILY BOSS BATTLE — <span style="color:var(--good)">DEFEATED</span></h3><div class="c" style="font-size:28px;margin:8px 0">✅ ${fm(C.boss.actual)} / ${fm(C.boss.target)}</div><div class="xs mut">Everyone got +50 XP. Streak freezes dropped.</div></div>`;
+    } else if (C.boss.passed === false) {
+      bossHtml = `<div class="card"><h3>👹 DAILY BOSS BATTLE — <span style="color:var(--bad)">FAILED</span></h3><div class="c" style="font-size:28px;margin:8px 0">❌ ${fm(C.boss.actual)} / ${fm(C.boss.target)}</div><div class="xs mut">Crew missed the target. 3 fails this week = weekly goal XP disabled.</div></div>`;
+    } else {
+      bossHtml = `<div class="card"><h3>👹 DAILY BOSS BATTLE — <span style="color:var(--acc2)">ACTIVE</span></h3><div class="c" style="font-size:28px;margin:8px 0">${fm(C.boss.actual)} / ${fm(C.boss.target)} <span class="pill">${pct}%</span></div><div class="bar" style="margin:8px 0"><i style="width:${pct}%"></i></div><div class="xs mut">Target resets at 3 AM IST. Verified timer minutes count. Everyone must contribute.</div></div>`;
+    }
+    h += bossHtml;
+  }
+  
+  h += `<div class="card"><div class="sub-tabs" style="margin:0 0 8px">${[['week', 'Week'], ['month', 'Month'], ['all', 'All-time']].map(([k, n]) => `<span class="chip ${S.crewPeriod === k ? 'on' : ''}" data-act="crewPeriod" data-v="${k}">${n}</span>`).join('')}</div><h3>${{ week: "This week's league", month: 'This month', all: 'All-time legends' }[S.crewPeriod]}</h3><table class="tbl">${crewSorted(C).map((m, i) => {
     const st = m.live ? '<span class="dot live"></span>' : m.qualified ? '<span class="dot g"></span>' : m.today_min > 0 ? '<span class="dot y"></span>' : '<span class="dot"></span>';
-    return `<tr><td style="width:22px" class="mut">${m.rank}</td><td style="width:42px"><div class="av" style="background:${m.color}33;border:2px solid ${m.color}">${esc(m.emoji)}</div></td>
-      <td><b>${esc(m.display)}${m.me ? ' (you)' : ''}</b> ${st}<div class="xs mut">Lv ${m.level.level} ${esc(m.level.rank)} · 🔥${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span style="color:var(--good)">live: ${esc(m.live.subject)}</span>` : ''}</div></td>
-      <td class="c"><b>${m.week_xp}</b><div class="xs mut">XP · ${fm(m.week_min)}</div></td>
+    return `<tr><td style="width:22px" class="mut">${i === 0 ? '👑' : i + 1}</td><td style="width:42px"><div class="av" style="background:${m.color}33;border:2px solid ${m.color}">${esc(m.emoji)}</div></td>
+      <td><b>${esc(m.display)}${m.me ? ' (you)' : ''}</b>${m.crowns ? ` <span title="weekly wins">👑×${m.crowns}</span>` : ''} ${st}<div class="xs mut">Lv ${m.level.level} ${m.level.emoji} ${esc(m.level.rank)} · 🔥${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span style="color:var(--good)">live: ${m.live.mode === 'stopwatch' ? '⏱ ' : ''}${esc(m.live.subject)}</span>` : ''}</div></td>
+      <td class="c"><b>${pv(m).xp}</b><div class="xs mut">XP · ${fm(pv(m).min)}</div></td>
       <td style="width:50px">${!m.me && !m.qualified ? `<button class="btn-s" ${m.nudged ? 'disabled style="opacity:.4"' : ''} data-act="nudge" data-id="${m.id}">👊</button>` : ''}</td></tr>`;
   }).join('')}</table><div class="xs mut">● live now · ● floor hit · ● some work · ○ nothing yet. 👊 = nudge (+5 XP for you). League resets every Monday: fresh start for everyone.</div></div>`;
+  if (C.records && C.records.length) h += `<div class="card"><h3>🏛️ Crew records</h3>${C.records.map(r => `<div class="q"><div class="grow sm">${esc(r.label)}</div><div class="c"><b>${r.unit === 'min' ? fm(r.value) : r.value + ' ' + r.unit}</b><div class="xs mut">${esc(r.emoji)} ${esc(r.name)}${r.me ? ' (you, defend it)' : ''}</div></div></div>`).join('')}<div class="xs mut" style="margin-top:6px">Break one in a verified session and the whole crew sees it in the feed.</div></div>`;
+  if (C.hall && C.hall.length) h += `<div class="card"><h3>👑 Weekly champions</h3>${C.hall.map(x => `<div class="q"><span class="xs mut" style="width:58px">wk ${esc(x.week.slice(5))}</span><div class="grow">${esc(x.emoji)} <b>${esc(x.name)}</b></div><span class="pill">${x.xp} XP</span></div>`).join('')}</div>`;
   const others = C.members.filter(m => !m.me);
   h += `<div class="card"><div class="row between"><h3>⚔️ Duels</h3></div>${C.duels.length ? C.duels.map(d => `<div class="q"><div class="grow"><b>${esc(d.an)}</b> vs <b>${esc(d.bn)}</b> <span class="xs mut">${d.days}d · most focus minutes wins</span>${d.status === 'active' ? `<div class="xs">${fm(d.a_min)} — ${fm(d.b_min)} · ends ${d.end}</div>` : '<div class="xs mut">waiting for accept…</div>'}</div>${d.status === 'pending' && d.b === C.me ? `<button class="btn-p btn-s" data-act="acceptDuel" data-id="${d.id}">Accept</button>` : ''}</div>`).join('') : '<div class="mut sm">No duels. Pick a victim.</div>'}
     ${others.length ? `<div class="row" style="margin-top:8px"><select id="du_o">${others.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('')}</select><select id="du_d" style="width:90px"><option value="3">3d</option><option value="7" selected>7d</option><option value="14">14d</option></select><button data-act="duel">Challenge</button></div>` : ''}</div>`;
@@ -271,9 +343,10 @@ function vMe() {
   const hm = I.heat.map(c => { const a = c.f ? '#3ea6ff66' : c.m === 0 ? '#1b1b2a' : `rgba(124,92,255,${Math.min(.25 + c.m / 240 * .75, 1)})`; return `<i title="${c.d}: ${fm(c.m)}${c.f ? ' ❄️' : ''}" style="background:${a}"></i>`; }).join('');
   const hrmx = Math.max(...I.hours, 1);
   const best = I.hours.indexOf(Math.max(...I.hours));
-  let h = `<div class="card glow"><div class="row"><div class="av" style="width:56px;height:56px;font-size:30px;background:${u.color}33;border:2px solid ${u.color}">${esc(u.emoji)}</div><div class="grow"><h2>${esc(u.display)}</h2><div class="mut sm">Level ${L.level} · ${esc(L.rank)} · ${L.xp} XP</div></div></div>
+  let h = `<div class="card glow"><div class="row"><div class="av" style="width:56px;height:56px;font-size:30px;background:${u.color}33;border:2px solid ${u.color}">${esc(u.emoji)}</div><div class="grow"><h2>${esc(u.display)}</h2><div class="mut sm">Level ${L.level} · ${L.emoji} ${esc(L.rank)} · ${L.xp} XP</div></div></div>
     <div class="bar" style="margin:12px 0 4px"><i style="width:${L.pct}%"></i></div></div>`;
-  h += `<div class="card"><h3>The Outgrow meter</h3><p class="sm mut">Your last 7 days vs. the old A+ you (${og.baseline_h}h/day).</p><div class="row between"><div class="big" style="color:${pct >= 100 ? 'var(--good)' : 'var(--acc2)'}">${pct}%</div><div class="sm" style="text-align:right">${pct >= 130 ? '🦋 You have outgrown them.' : pct >= 100 ? '🔥 You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
+  h += `<div class="card"><details><summary><b style="color:var(--tx)">Title ladder</b> · ${I.ladder.length} titles, next: ${L.next_rank ? L.next_emoji + ' ' + esc(L.next_rank) + ' (Lv ' + L.next_at + ')' : 'you are at the top'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .45}"><span style="font-size:22px;width:30px">${r.emoji}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">YOU</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(60 * (r.level - 1) ** 2).toLocaleString()} XP</span></div>`).join('')}</details></div>`;
+  h += `<div class="card"><h3>The Ragda meter</h3><p class="sm mut">Your last 7 days vs. the old A+ you (${og.baseline_h}h/day).</p><div class="row between"><div class="big" style="color:${pct >= 100 ? 'var(--good)' : 'var(--acc2)'}">${pct}%</div><div class="sm" style="text-align:right">${pct >= 130 ? '🦋 You are Ragdamaxed. The old you cannot keep up.' : pct >= 100 ? '🔥 You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
     <div class="bar ${pct >= 100 ? 'g' : ''}" style="margin:8px 0"><i style="width:${Math.min(pct, 100)}%"></i></div>`;
   if (I.ghost) h += `<h3 style="margin-top:14px">You vs your best week (ghost)</h3>${lines([{ v: I.ghost.cum, c: '#8b8ba3', d: 1, w: 2 }, { v: I.cum, c: '#22d3a6', w: 3 }])}<div class="xs mut">Grey dashed = your best week (${fm(I.ghost.total)}). Green = this week.</div>`;
   h += `</div>`;
@@ -333,11 +406,13 @@ const A = {
   async tab(el) { if (el.dataset.sub) S.sub = el.dataset.sub; await go(el.dataset.v); },
   pickSub(el) { S.pickSub = el.dataset.v; render(); },
   pickDur(el) { S.pickDur = +el.dataset.v; render(); },
-  async startTimer() { await api('timer/start', { subject: S.pickSub, target: S.pickDur }); await go('today'); },
+  pickMode(el) { S.pickMode = el.dataset.v; render(); },
+  crewPeriod(el) { S.crewPeriod = el.dataset.v; render(); },
+  async startTimer() { await api('timer/start', { subject: S.pickSub, target: S.pickDur, mode: S.pickMode }); await go('today'); },
   async start5() { await api('timer/start', { subject: S.pickSub, target: 5 }); await go('today'); },
   async extend() { await api('timer/extend', { add: 20 }); await go('today'); },
   async distract() { await api('timer/distract', {}); const d = $('#dcount'); if (d) d.textContent = +d.textContent + 1; S.today.timer.distractions++; },
-  async stopTimer() { const r = await api('timer/stop', {}); if (r.too_short) toast('Under 5 minutes — not logged', 'Even 5 counts. Go again.'); else if (r.minutes >= 25) beep(); await go('today'); },
+  async stopTimer() { const r = await api('timer/stop', {}); if (r.too_short) toast('Under 5 minutes — not logged', 'Even 5 counts. Go again.'); else { if (r.capped) toast('Stopwatch capped at 4h', 'Anything past that does not count.'); if (r.minutes >= 25) beep(); } await go('today'); },
   async discard() { if (confirm('Discard this block? Nothing will be logged.')) { await api('timer/stop', { discard: true }); await go('today'); } },
   async manual() { await api('focus', { subject: val('mf_s'), minutes: +val('mf_m') }); await go('today'); },
   async delFocus(el) { await api('focus/delete', { id: +el.dataset.id }); await go('today'); },
@@ -385,7 +460,7 @@ document.addEventListener('click', e => { const el = e.target.closest('[data-act
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && S.user === null && ($('#a_pin') === document.activeElement || $('#a_user') === document.activeElement)) A[S.authMode === 'login' ? 'login' : 'register'](); });
 
 /* ---------- CHAT: text only. Crew room + private DMs ---------- */
-const CH = { threads: [], people: {}, open: null, msgs: [], more: false, seq: -1, unread: {}, total: 0, run: 0, ctl: null, notified: 0, loading: false };
+const CH = { threads: [], people: {}, open: null, msgs: [], more: false, seq: -1, unread: {}, total: 0, run: 0, ctl: null, notified: 0, loading: false, reply: null, sel: null, edit: null };
 let chatSending = false;
 const chatKey = k => encodeURIComponent(k);
 const chatClock = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -414,7 +489,7 @@ function vChat() {
     ? `<div class="av" style="width:30px;height:30px;font-size:15px;background:${esc(t.color)}33">${esc(t.emoji)}</div><b>${esc(t.title)}</b><span class="xs mut">private</span>`
     : `<b># ${esc(t.title || 'crew')}</b><span class="xs mut">whole crew</span>`;
   return `<div class="chat"><div class="chat-h row"><button class="btn-s" data-act="chatBack">←</button>${head}</div><div class="msgs" id="chat_msgs"></div>
-    <div class="composer"><textarea id="chat_in" rows="1" maxlength="1000" placeholder="${t.kind === 'dm' ? 'Message ' + esc(t.title) : 'Message the crew'}"></textarea><button class="btn-p" data-act="chatSend">Send</button></div></div>`;
+    <div id="chat_ctx"></div><div class="composer"><textarea id="chat_in" rows="1" maxlength="1000" placeholder="${t.kind === 'dm' ? 'Message ' + esc(t.title) : 'Message the crew'}"></textarea><button class="btn-p" data-act="chatSend">Send</button></div></div>`;
 }
 function vThreads() {
   const row = t => {
@@ -427,7 +502,7 @@ function vThreads() {
   return `<div class="card"><h3>Crew room</h3>${crew.map(row).join('')}<div class="xs mut" style="margin-top:6px">Text only. No media, no files. Nothing to scroll, nothing to get lost in.</div></div>
     <div class="card"><h3>Direct messages</h3>${dms.length ? dms.map(row).join('') : '<div class="mut sm">No one else in the crew yet. Share the invite code.</div>'}<div class="xs mut" style="margin-top:6px">Only you and them can see a DM inside the app.</div></div>`;
 }
-function chatAfterRender() { if (CH.open) { chatPaint(true); const ta = $('#chat_in'); if (ta && !matchMedia('(pointer:coarse)').matches) ta.focus(); } }
+function chatAfterRender() { if (CH.open) { chatPaint(true); chatCtx(); const ta = $('#chat_in'); if (ta && !matchMedia('(pointer:coarse)').matches) ta.focus(); } }
 
 function chatPaint(stick) {
   const el = $('#chat_msgs'); if (!el) return;
@@ -439,9 +514,14 @@ function chatPaint(stick) {
     if (day !== prevDay) { h += `<div class="daysep"><span>${esc(day)}</span></div>`; prevDay = day; prev = null; }
     const p = CH.people[m.uid] || { display: 'Member', emoji: '👤', color: '#8b8ba3' };
     const grp = prev && prev.uid === m.uid && (new Date(m.ts) - new Date(prev.ts)) < 5 * 60e3;
-    h += `<div class="msg ${grp ? 'grp' : ''}">${grp ? '<div class="av sp"></div>' : `<div class="av" style="background:${esc(p.color)}33;border:2px solid ${esc(p.color)}">${esc(p.emoji)}</div>`}
-      <div class="mb">${grp ? '' : `<div class="mh"><b style="color:${esc(p.color)}">${esc(p.display)}</b><span class="xs mut">${chatClock(m.ts)}</span></div>`}<div class="mt">${esc(m.text)}</div></div>
-      ${m.uid === S.user.id ? `<button class="mx" data-act="chatDel" data-id="${m.id}" title="Delete">🗑</button>` : ''}</div>`;
+    const mine = m.uid === S.user.id, sel = CH.sel === m.id;
+    const ment = !mine && m.text.toLowerCase().includes('@' + String(S.user.display).toLowerCase());
+    const canEdit = mine && (Date.now() - new Date(m.ts).getTime()) < 24 * 3600e3; // server enforces the real 30 min window
+    const rx = m.re ? `<div class="rxs">${Object.entries(m.re).map(([e, n]) => `<span class="rx ${m.mine === e ? 'me' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e} ${n}</span>`).join('')}</div>` : '';
+    const acts = sel ? `<div class="acts">${CHAT_EMOJIS.map(e => `<button class="${m.mine === e ? 'on' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}<button data-act="chatReply" data-id="${m.id}" title="Reply">↩</button>${canEdit ? `<button data-act="chatEdit" data-id="${m.id}" title="Edit">✏️</button>` : ''}${mine ? `<button data-act="chatDel" data-id="${m.id}" title="Delete">🗑</button>` : ''}</div>` : '';
+    const qt = m.reply ? `<div class="qt" data-act="chatJump" data-id="${m.reply.id}"><b>${esc((CH.people[m.reply.uid] || {}).display || 'Member')}</b> ${esc(m.reply.text)}</div>` : '';
+    h += `<div class="msg ${grp ? 'grp' : ''} ${ment ? 'ment' : ''} ${sel ? 'sel' : ''}" data-act="chatSel" data-id="${m.id}" data-mid="${m.id}">${grp ? '<div class="av sp"></div>' : `<div class="av" style="background:${esc(p.color)}33;border:2px solid ${esc(p.color)}">${esc(p.emoji)}</div>`}
+      <div class="mb">${grp ? '' : `<div class="mh"><b style="color:${esc(p.color)}" data-act="chatMention" data-v="${esc(p.display)}">${esc(p.display)}</b><span class="xs mut">${chatClock(m.ts)}</span></div>`}${qt}<div class="mt">${chatFmt(m.text)}${m.edited ? ' <span class="xs mut">(edited)</span>' : ''}</div>${rx}${acts}</div></div>`;
     prev = m;
   });
   el.innerHTML = h;
@@ -454,6 +534,12 @@ function chatApply(r) {
   const have = new Set(CH.msgs.map(m => m.id)), fresh = r.messages.filter(m => !have.has(m.id));
   if (fresh.length) { CH.msgs.push(...fresh); changed = true; }
   if (r.deleted && r.deleted.length) { const gone = new Set(r.deleted), n = CH.msgs.length; CH.msgs = CH.msgs.filter(m => !gone.has(m.id)); changed = changed || CH.msgs.length !== n; }
+  if (r.states) CH.msgs.forEach(m => {
+    const st = r.states[m.id]; if (!st) return;
+    const sig = JSON.stringify([m.re, m.mine, m.text, m.edited]);
+    m.re = st.re; m.mine = st.mine; if (st.ed) { m.edited = true; m.text = st.t; }
+    if (sig !== JSON.stringify([m.re, m.mine, m.text, m.edited])) changed = true;
+  });
   if (changed) chatPaint(stick);
   const theirs = fresh.filter(m => m.uid !== S.user.id);
   if (theirs.length && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
@@ -463,7 +549,7 @@ function chatApply(r) {
 }
 
 async function chatOpen(key) {
-  chatStop(); CH.open = key; CH.msgs = []; CH.more = false; CH.loading = true; render();
+  chatStop(); CH.open = key; CH.msgs = []; CH.more = false; CH.loading = true; CH.reply = CH.sel = CH.edit = null; render();
   try {
     const r = await api('chat/messages?thread=' + chatKey(key) + (document.hidden ? '' : '&mark=1'));
     CH.msgs = r.messages; CH.more = r.more; Object.assign(CH, { seq: r.seq, unread: r.unread, total: r.total }); Object.assign(CH.people, r.people);
@@ -488,17 +574,63 @@ async function chatLoop() {
     }
   }
 }
+const CHAT_EMOJIS = ['🔥', '💀', '😂', '👍', '❤️', '🫡', '💯'];
+function chatFmt(t) {
+  let h = esc(t);
+  Object.values(CH.people).forEach(p => { const e = esc(p.display); if (e) h = h.split('@' + e).join(`<span class="men">@${e}</span>`); });
+  return h;
+}
+function chatCtx() {
+  const el = $('#chat_ctx'); if (!el) return;
+  const who = id => (CH.people[id] || { display: 'Member' }).display;
+  el.innerHTML = CH.edit ? '<div class="ctx"><span class="ell">✏️ Editing your message</span><button class="btn-s" data-act="chatCancel">✕</button></div>'
+    : CH.reply ? `<div class="ctx"><span class="ell">↩ Replying to <b>${esc(who(CH.reply.uid))}</b>: ${esc(CH.reply.text)}</span><button class="btn-s" data-act="chatCancel">✕</button></div>` : '';
+}
 async function chatSend() {
   const ta = $('#chat_in'); if (!ta || chatSending) return;
   const text = ta.value.trim(); if (!text) return;
   chatSending = true;
   try {
-    const r = await api('chat/send', { thread: CH.open, text });
+    if (CH.edit) {
+      const r = await api('chat/edit', { id: CH.edit, text });
+      const m = CH.msgs.find(x => x.id === CH.edit); if (m) { m.text = r.text; m.edited = true; }
+      CH.edit = null;
+    } else {
+      const r = await api('chat/send', { thread: CH.open, text, reply_to: CH.reply ? CH.reply.id : undefined });
+      if (!CH.msgs.some(m => m.id === r.message.id)) CH.msgs.push(r.message);
+      CH.reply = null;
+    }
     ta.value = ''; ta.style.height = 'auto';
-    if (!CH.msgs.some(m => m.id === r.message.id)) CH.msgs.push(r.message);
-    chatPaint(true);
+    chatCtx(); chatPaint(true);
   } catch (e) { } finally { chatSending = false; ta.focus(); }
 }
+function chatSel(el) { const id = +el.dataset.id; CH.sel = CH.sel === id ? null : id; chatPaint(false); }
+async function chatReact(el) {
+  const id = +el.dataset.id, e = el.dataset.e, m = CH.msgs.find(x => x.id === id); if (!m) return;
+  m.re = m.re || {};
+  if (m.mine) { m.re[m.mine] = (m.re[m.mine] || 1) - 1; if (!m.re[m.mine]) delete m.re[m.mine]; }
+  if (m.mine === e) m.mine = undefined; else { m.re[e] = (m.re[e] || 0) + 1; m.mine = e; }
+  if (!Object.keys(m.re).length) m.re = undefined;
+  CH.sel = null; chatPaint(false);
+  try { await api('chat/react', { id, emoji: e }); } catch (x) { }
+}
+function chatReply(el) {
+  const m = CH.msgs.find(x => x.id === +el.dataset.id); if (!m) return;
+  CH.reply = { id: m.id, uid: m.uid, text: m.text.slice(0, 90) }; CH.edit = null; CH.sel = null;
+  chatPaint(false); chatCtx(); const ta = $('#chat_in'); if (ta) ta.focus();
+}
+function chatEdit(el) {
+  const m = CH.msgs.find(x => x.id === +el.dataset.id); if (!m) return;
+  CH.edit = m.id; CH.reply = null; CH.sel = null;
+  const ta = $('#chat_in'); if (ta) { ta.value = m.text; ta.focus(); ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 120) + 'px'; }
+  chatPaint(false); chatCtx();
+}
+function chatCancel() { if (CH.edit) { const ta = $('#chat_in'); if (ta) ta.value = ''; } CH.edit = null; CH.reply = null; chatCtx(); }
+function chatJump(el) {
+  const t = document.querySelector(`[data-mid="${el.dataset.id}"]`);
+  if (t) { t.scrollIntoView({ block: 'center' }); t.classList.add('flash'); setTimeout(() => t.classList.remove('flash'), 1300); } else toast('That message is further up', 'Tap "Load earlier messages"');
+}
+function chatMention(el) { const ta = $('#chat_in'); if (!ta) return; ta.value += (ta.value && !ta.value.endsWith(' ') ? ' ' : '') + '@' + el.dataset.v + ' '; ta.focus(); }
 async function chatOlder() {
   const first = CH.msgs.length ? CH.msgs[0].id : 0; if (!first) return;
   try {
@@ -511,7 +643,7 @@ async function chatOlder() {
 Object.assign(A, {
   chatOpen(el) { return chatOpen(el.dataset.v); },
   async chatBack() { chatStop(); CH.open = null; try { await chatLoadThreads(); } catch (e) { } render(); },
-  chatSend, chatOlder,
+  chatSend, chatOlder, chatSel, chatReact, chatReply, chatEdit, chatCancel, chatJump, chatMention,
   async chatDel(el) { if (!confirm('Delete this message for everyone?')) return; try { await api('chat/delete', { id: +el.dataset.id }); CH.msgs = CH.msgs.filter(m => m.id !== +el.dataset.id); chatPaint(false); } catch (e) { } },
   admin: adminOpen,
   async adminReset(el) { if (!confirm(`Reset PIN for @${el.dataset.v}? They get logged out.`)) return; try { const r = await api('admin/resetpin', { username: el.dataset.v }); prompt(`New PIN for ${r.username} (send it to them privately):`, r.pin); } catch (e) { } },
@@ -536,7 +668,7 @@ setInterval(async () => {
   } catch (e) { }
 }, 12000);
 
-/* ---------- admin dashboard (only for OUTGROW_ADMINS) ---------- */
+/* ---------- admin dashboard (only for RAGDAMAXING_ADMINS) ---------- */
 const fmUp = s => s >= 86400 ? Math.floor(s / 86400) + 'd ' + Math.floor(s % 86400 / 3600) + 'h' : s >= 3600 ? Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm' : Math.floor(s / 60) + 'm';
 async function adminOpen() {
   try {

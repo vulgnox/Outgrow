@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily OUTGROW database backup
+Description=Daily RAGDAMAXING database backup
 
 [Timer]
 OnCalendar=*-*-* 04:00:00

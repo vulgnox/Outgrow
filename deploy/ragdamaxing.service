@@ -1,15 +1,15 @@
 [Unit]
-Description=OUTGROW crew growth tracker
+Description=RAGDAMAXING crew growth tracker
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=outgrow
-Group=outgrow
-WorkingDirectory=/opt/outgrow/app
-EnvironmentFile=/etc/outgrow.env
+User=ragdamaxing
+Group=ragdamaxing
+WorkingDirectory=/opt/ragdamaxing/app
+EnvironmentFile=/etc/ragdamaxing.env
 Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 /opt/outgrow/app/server.py
+ExecStart=/usr/bin/python3 /opt/ragdamaxing/app/server.py
 Restart=always
 RestartSec=3
 # Be a good guest on a shared VPS
@@ -24,7 +24,7 @@ ProtectHome=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-ReadWritePaths=/opt/outgrow/app/data
+ReadWritePaths=/opt/ragdamaxing/app/data
 
 [Install]
 WantedBy=multi-user.target

@@ -2,7 +2,7 @@ import json, os, sys, time, urllib.request, http.cookiejar, subprocess, tempfile
 
 PORT = 8799
 tmp = tempfile.mkdtemp()
-env = dict(os.environ, PORT=str(PORT), OUTGROW_DB=os.path.join(tmp, "t.db"), OUTGROW_ADMINS="zenx")
+env = dict(os.environ, PORT=str(PORT), RAGDAMAXING_DB=os.path.join(tmp, "t.db"), RAGDAMAXING_ADMINS="zenx")
 srv = subprocess.Popen([sys.executable, "server.py"], env=env, cwd=os.path.dirname(os.path.abspath(__file__)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 time.sleep(1.5)
 
@@ -59,7 +59,7 @@ try:
     check("short timer discarded", r.get("too_short") is True, r)
     # force a verified session by backdating timer in db
     import sqlite3
-    db = sqlite3.connect(env["OUTGROW_DB"])
+    db = sqlite3.connect(env["RAGDAMAXING_DB"])
     a.call("POST", "/api/timer/start", {"subject": "Chemistry", "target": 60})
     db.execute("UPDATE timers SET started=started-3300 WHERE user_id=1"); db.commit()
     s, r = a.call("POST", "/api/timer/stop", {})
@@ -188,6 +188,59 @@ try:
     # rate limit (outsider's own crew room)
     codes = [dd.call("POST", "/api/chat/send", {"thread": "crew", "text": f"spam {i}"})[0] for i in range(12)]
     check("rate limit kicks in", codes[:10] == [200] * 10 and 429 in codes[10:], codes)
+
+    # ---------------- Ragdamaxing additions: stopwatch, titles, records, chat v2
+    e, f = Client(), Client()
+    check("register e", e.call("POST", "/api/register", {"username": "ragda1", "pin": "1111", "crew_code": code})[0] == 200)
+    check("register f", f.call("POST", "/api/register", {"username": "ragda2", "pin": "2222", "crew_code": code})[0] == 200)
+    r = f.call("GET", "/api/today")[1]
+    check("starter title", r["level"]["rank"] == "Lazy Larva" and r["level"]["next_rank"] == "Snooze Slayer" and r["level"]["emoji"], r["level"])
+    check("bad timer mode rejected", f.call("POST", "/api/timer/start", {"subject": "Maths", "mode": "banana"})[0] == 400)
+    s, r = e.call("POST", "/api/timer/start", {"subject": "Physics", "mode": "stopwatch"})
+    check("stopwatch start", s == 200, r)
+    r = e.call("GET", "/api/today")[1]
+    check("stopwatch visible in today", r["timer"]["mode"] == "stopwatch" and r["timer"]["target"] == 0, r["timer"])
+    check("friend sees stopwatch live", any(l.get("mode") == "stopwatch" for l in f.call("GET", "/api/today")[1]["live"]))
+    e.call("POST", "/api/timer/extend", {"add": 20})
+    check("extend ignored for stopwatch", db.execute("SELECT target FROM timers WHERE user_id=(SELECT id FROM users WHERE username='ragda1')").fetchone()[0] == 0)
+    db.execute("UPDATE timers SET started=started-7800 WHERE user_id=(SELECT id FROM users WHERE username='ragda1')"); db.commit()
+    s, r = e.call("POST", "/api/timer/stop", {})
+    check("stopwatch logs 130m", s == 200 and r["minutes"] in (129, 130, 131), r)
+    labels = [x.get("label", "") for x in r["events"] if x["t"] == "xp"]
+    check("marathon bonus paid", any("Marathon" in l for l in labels), labels)
+    e.call("POST", "/api/timer/start", {"subject": "Maths", "mode": "stopwatch"})
+    db.execute("UPDATE timers SET started=started-18000 WHERE user_id=(SELECT id FROM users WHERE username='ragda1')"); db.commit()
+    s, r = e.call("POST", "/api/timer/stop", {})
+    check("stopwatch capped at 4h", s == 200 and r["minutes"] == 240 and r.get("capped") == 240, r)
+    r = e.call("GET", "/api/crew")[1]
+    me = next(m for m in r["members"] if m["me"])
+    check("crew has period + record fields", me["best_session"] == 240 and "month_xp" in me and "all_xp" in me and "crowns" in me, me)
+    check("crew records + hall present", any(x["k"] == "best_session" and x["value"] == 240 for x in r["records"]) and isinstance(r["hall"], list), r["records"])
+    check("record announced in feed", any(x["kind"] in ("record", "session") for x in r["feed"]))
+
+    s, r = e.call("POST", "/api/chat/send", {"thread": "crew", "text": "yo @ragda2 check this"}); m1 = r["message"]["id"]
+    s, r = f.call("POST", "/api/chat/send", {"thread": "crew", "text": "replying", "reply_to": m1}); m2 = r["message"]["id"]
+    check("reply stored with preview", s == 200 and r["message"]["reply"]["id"] == m1 and r["message"]["reply"]["text"].startswith("yo"), r)
+    s, r = f.call("POST", "/api/chat/send", {"thread": "crew", "text": "bogus reply", "reply_to": 999999})
+    check("bogus reply_to ignored", s == 200 and "reply" not in r["message"], r)
+    check("react ok", f.call("POST", "/api/chat/react", {"id": m1, "emoji": "🔥"})[0] == 200)
+    check("bad emoji rejected", f.call("POST", "/api/chat/react", {"id": m1, "emoji": "🍕"})[0] == 400)
+    check("outsider cannot react", dd.call("POST", "/api/chat/react", {"id": m1, "emoji": "🔥"})[0] == 404)
+    r = e.call("GET", "/api/chat/messages?thread=crew")[1]
+    got = next(m for m in r["messages"] if m["id"] == m1)
+    check("reaction visible to author", got.get("re") == {"🔥": 1}, got)
+    check("replies carry preview on fetch", next(m for m in r["messages"] if m["id"] == m2)["reply"]["id"] == m1)
+    f.call("POST", "/api/chat/react", {"id": m1, "emoji": "🔥"})
+    r = e.call("GET", f"/api/chat/messages?thread=crew&first={m1}")[1]
+    check("same emoji toggles off (states)", "re" not in r["states"][str(m1)], r["states"][str(m1)])
+    check("cannot edit others", f.call("POST", "/api/chat/edit", {"id": m1, "text": "hax"})[0] == 403)
+    check("edit own", e.call("POST", "/api/chat/edit", {"id": m1, "text": "yo @ragda2 (fixed)"})[0] == 200)
+    r = f.call("GET", f"/api/chat/messages?thread=crew&first={m1}")[1]
+    st = r["states"][str(m1)]
+    check("edit syncs to others", st.get("ed") == 1 and st.get("t") == "yo @ragda2 (fixed)", st)
+    check("edit rejects empty", e.call("POST", "/api/chat/edit", {"id": m1, "text": "   "})[0] == 400)
+    db.execute("UPDATE messages SET ts='2000-01-01T00:00:00' WHERE id=?", (m1,)); db.commit()
+    check("edit window enforced", e.call("POST", "/api/chat/edit", {"id": m1, "text": "late"})[0] == 400)
 
     # admin
     s, r = a.call("GET", "/api/admin/stats"); check("admin stats", s == 200 and r["app"]["users"] >= 4 and "rss_mb" in r["server"] and r["app"]["messages_total"] > 0, r)

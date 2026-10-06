@@ -1,0 +1,6 @@
+[Unit]
+Description=Pull the latest RAGDAMAXING from GitHub (rolls back if it won't start)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/ragdamaxing/update.sh

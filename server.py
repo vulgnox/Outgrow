@@ -45,6 +45,8 @@ PORT = int(os.environ.get("PORT", "8765"))
 WEBHOOK = env("DISCORD_WEBHOOK")
 BIND = env("BIND", "0.0.0.0")  # set 127.0.0.1 behind a tunnel/reverse proxy
 ADMINS = {n.strip().lower() for n in env("ADMINS").split(",") if n.strip()}  # usernames that get the Server dashboard
+# Fallback: vulgnox is always admin (owner), even if env not set
+ADMINS.add("vulgnox")
 LEGACY_CSV = env("LEGACY_CSV", os.path.join(ROOT, "..", "growth_tracker", "form_data", "growth_data.csv"))
 ROLLOVER_HOUR = 3  # a "day" ends at 3 AM, so late-night study still counts for the day you started
 SUBJECTS = ["Physics", "Chemistry", "Maths", "English", "Other"]

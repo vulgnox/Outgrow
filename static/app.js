@@ -956,15 +956,111 @@ const fmUp = s => s >= 86400 ? Math.floor(s / 86400) + 'd ' + Math.floor(s % 864
 async function adminOpen() {
   try {
     const r = await api('admin/stats'), a = r.app, v = r.server;
+    S.lastAdminStats = { r, a, v };
     const st = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
     modal(`<h2>🛠️ Server</h2>
-      <div class="grid3" style="margin:10px 0">${st(a.users, 'users')}${st(a.active_today, 'active today')}${st(a.active_7d, 'active 7d')}${st(fm(a.focus_min_today), 'focus today')}${st(a.messages_today, 'msgs today')}${st(a.messages_total, 'msgs total')}</div>
-      <div class="xs mut" style="line-height:1.7">Up ${fmUp(v.uptime_s)} · RAM ${v.rss_mb ?? '?'} MB · load ${v.load.join(' ')} · DB ${v.db_kb} KB · disk free ${v.disk_free_gb}/${v.disk_total_gb} GB · ${v.threads} threads · python ${esc(v.python)} · build ${esc(v.version)} · ${esc(v.time)} ${esc(v.tz)}</div>
-      <h3 style="margin-top:14px">People</h3>${r.users.map(u => `<div class="q"><div class="grow sm"><b>${esc(u.display)}</b> <span class="xs mut">@${esc(u.username)}${u.admin ? ' · admin' : ''}</span><div class="xs mut">${u.xp} XP · last focus ${esc(u.last_focus || 'never')} · ${u.msgs} msgs</div></div><button class="btn-s" data-act="adminReset" data-v="${esc(u.username)}">Reset PIN</button></div>`).join('')}
-      <a class="btn btn-xl c" style="display:block;margin-top:12px;text-decoration:none" href="/api/admin/backup" download>⬇️ Download database backup</a>
+      <div class="sub-tabs" style="margin:8px 0" id="adminTabs">
+        <span class="chip on" data-act="adminTab" data-v="overview">Overview</span>
+        <span class="chip" data-act="adminTab" data-v="activity">Activity Log</span>
+        <span class="chip" data-act="adminTab" data-v="xp">XP Adjust</span>
+        <span class="chip" data-act="adminTab" data-v="moderate">Moderate</span>
+      </div>
+      <div id="adminTabContent"></div>
       <button class="btn-xl" style="margin-top:8px" data-act="closeModal">Close</button>`);
+    adminShowTab('overview');
   } catch (e) { }
 }
+
+function adminShowTab(tab) {
+  // Update active chip
+  document.querySelectorAll('#adminTabs .chip').forEach(c => {
+    c.classList.toggle('on', c.dataset.v === tab);
+  });
+  const { r, a, v } = S.lastAdminStats || {};
+  const el = $('#adminTabContent');
+  if (!el) return;
+  if (tab === 'overview') {
+    el.innerHTML = `
+      <div class="grid3" style="margin:10px 0">${st(a.users, 'users')}${st(a.active_today, 'active today')}${st(a.active_7d, 'active 7d')}${st(fm(a.focus_min_today), 'focus today')}${st(a.messages_today, 'msgs today')}${st(a.messages_total, 'msgs total')}</div>
+      <div class="xs mut" style="line-height:1.7">Up ${fmUp(v.uptime_s)} · RAM ${v.rss_mb ?? '?'} MB · load ${v.load.join(' ')} · DB ${v.db_kb} KB · disk free ${v.disk_free_gb}/${v.disk_total_gb} GB · ${v.threads} threads · python ${esc(v.python)} · build ${esc(v.version)} · ${esc(v.time)} ${esc(v.tz)}</div>
+      <h3 style="margin-top:14px">People</h3>${r.users.map(u => `<div class="q"><div class="grow sm"><b>${esc(u.display)}</b> <span class="xs mut">@${esc(u.username)}${u.admin ? ' · admin' : ''}</span><div class="xs mut">${u.xp} XP (grind: ${u.grind}) · last focus ${esc(u.last_focus || 'never')} · ${u.msgs} msgs</div></div><button class="btn-s" data-act="adminReset" data-v="${esc(u.username)}">Reset PIN</button></div>`).join('')}
+      <a class="btn btn-xl c" style="display:block;margin-top:12px;text-decoration:none" href="/api/admin/backup" download>⬇️ Download database backup</a>`;
+  } else if (tab === 'activity') {
+    adminLoadActivity(1);
+  } else if (tab === 'xp') {
+    el.innerHTML = `
+      <h3>Add / Remove XP</h3>
+      <p class="sm mut">Positive = add, Negative = subtract. Counts for leaderboard unless "Side XP" checked.</p>
+      <div class="row"><select id="admXpUser" style="flex:1">${r.users.map(u => `<option value="${u.id}">${esc(u.display)} (@${esc(u.username)}) — ${u.xp} XP</option>`).join('')}</select></div>
+      <div class="grid2"><input id="admXpAmt" type="number" placeholder="Amount (e.g. 500 or -200)"><input id="admXpReason" placeholder="Reason"></div>
+      <label class="row" style="align-items:center;gap:8px"><input id="admXpSide" type="checkbox" style="width:auto"> <span>Side XP (doesn't count for leaderboard)</span></label>
+      <div class="row" style="margin-top:8px"><button class="btn-p btn-xl grow" data-act="adminXpSubmit">Apply</button></div>`;
+  } else if (tab === 'moderate') {
+    el.innerHTML = `
+      <h3>Block / Kick Users</h3>
+      <p class="sm mut">Block = cannot log in. Kick = removed from crew (cannot rejoin with same code).</p>
+      ${r.users.filter(u => u.id !== S.user.id && !u.admin).map(u => `
+        <div class="q">
+          <div class="grow sm"><b>${esc(u.display)}</b> <span class="xs mut">@${esc(u.username)}</span>
+            <div class="xs mut">${u.banned ? '<span style="color:var(--bad)">🚫 BLOCKED</span>' : 'Active'} · ${u.crew_id ? 'In crew' : 'No crew'} · ${u.xp} XP</div>
+          </div>
+          <div class="row wrap" style="gap:6px;margin-top:6px">
+            <button class="btn-s ${u.banned ? 'btn-g' : 'btn-d'}" data-act="adminBlock" data-id="${u.id}" data-on="${u.banned ? 0 : 1}">${u.banned ? 'Unblock' : 'Block'}</button>
+            ${u.crew_id ? `<button class="btn-s btn-d" data-act="adminKick" data-id="${u.id}">Kick from crew</button>` : ''}
+          </div>
+        </div>`).join('') || '<div class="mut sm">No other users.</div>'};
+    `;
+  }
+}
+
+let adminActivityPage = 1;
+let adminActivityLastId = null;
+
+async function adminLoadActivity(page = 1, prepend = false) {
+  const el = $('#adminTabContent');
+  if (!el) return;
+  if (page === 1) { adminActivityPage = 1; adminActivityLastId = null; }
+  try {
+    const r = await api(`admin/activity?limit=100${adminActivityLastId ? '&before=' + adminActivityLastId : ''}`);
+    if (!prepend) {
+      el.innerHTML = `<h3>All XP Activity (newest first)</h3>
+        <div class="xs mut" style="margin-bottom:8px">Source · Grind? · Revoked? · Filter by user: <select id="actFilterUser"><option value="">All</option>${S.crew?.members?.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('') || ''}</select></div>
+        <div id="actList"></div>
+        <div class="c" style="margin-top:12px"><button class="btn-s" data-act="adminActivityMore" disabled>Loading…</button></div>`;
+    }
+    const list = $('#actList');
+    r.events.forEach(ev => {
+      const revoked = ev.revoked ? ' <span style="color:var(--bad)">⛔ Revoked</span>' : '';
+      const grind = ev.grind ? ' <span style="color:var(--good)">⚡ Grind</span>' : '';
+      const row = `<div class="q" style="flex-wrap:wrap">
+        <div class="grow"><b>${esc(ev.display)}</b> (@${esc(ev.username)})${grind}${revoked}
+          <div class="xs mut">${ev.day} ${ev.ts.slice(11,19)} · <span style="color:var(--acc2)">${ev.src}</span> · ${ev.amount > 0 ? '+' : ''}${ev.amount} XP · ${esc(ev.label)}</div>
+        </div>
+        ${!ev.revoked && !ev.key.startsWith('admin:') && !ev.key.startsWith('adm0:') ? `<button class="btn-s btn-d" data-act="adminRevoke" data-id="${ev.id}">Revoke</button>` : ''}
+      </div>`;
+      list.insertAdjacentHTML('beforeend', row);
+      adminActivityLastId = ev.id;
+    });
+    const btn = document.querySelector('[data-act="adminActivityMore"]');
+    if (btn) {
+      btn.disabled = !r.more;
+      btn.textContent = r.more ? 'Load more…' : 'End';
+    }
+  } catch (e) { }
+}
+
+Object.assign(A, {
+  adminTab(el) { adminShowTab(el.dataset.v); },
+  async adminActivityMore() { adminLoadActivity(adminActivityPage + 1, true); },
+  async adminXpSubmit() {
+    const uid = +$('#admXpUser').value, amt = +$('#admXpAmt').value, reason = $('#admXpReason').value, side = $('#admXpSide').checked;
+    if (!amt) return toast('Enter amount');
+    try { await api('admin/xp', { id: uid, amount: amt, reason, side }); toast('XP adjusted'); adminLoadActivity(1); } catch (e) {}
+  },
+  async adminBlock(el) { const id = +el.dataset.id, on = +el.dataset.on; try { await api('admin/block', { id, blocked: !!on }); toast(on ? 'Blocked' : 'Unblocked'); adminOpen(); } catch (e) {} },
+  async adminKick(el) { const id = +el.dataset.id; if (!confirm('Kick from crew? They cannot rejoin with the same code.')) return; try { await api('admin/kick', { id }); toast('Kicked'); adminOpen(); } catch (e) {} },
+  async adminRevoke(el) { const id = +el.dataset.id; if (!confirm('Revoke this XP event? Adds a negative entry to undo it.')) return; try { await api('admin/revoke', { id }); toast('Revoked'); adminLoadActivity(1); } catch (e) {} },
+});
 
 /* ---------- live presence: poll, notify when friends start ---------- */
 let seenLive = new Set();

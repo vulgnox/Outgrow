@@ -163,13 +163,15 @@ function vToday() {
       <div class="in"><div class="clock" id="clock" style="font-size:52px">--:--</div><div class="xs mut" id="tsub"></div></div></div>
       <div class="row wrap" style="justify-content:center;margin-top:6px"><button data-act="distract">😵 Lost focus (<span id="dcount">${tm.distractions}</span>)</button></div>
       <p class="xs mut" id="tmsg">${tm.mode === 'stopwatch' ? 'Open-ended. Go as long as you can, every minute is XP. (4h max per session)' : 'Phone away. One tab. Pen in hand.'}</p>
-      <div class="row"><button class="btn-g grow" data-act="stopTimer">✅ Finish & log</button><button class="btn-d" data-act="discard">Discard</button></div></div>`;
+      <div class="row"><button class="btn-g grow" data-act="stopTimer">✅ Finish & log</button><button class="btn-d" data-act="discard">Discard</button></div>
+      <button class="btn-p" style="margin-top:8px;width:100%" data-act="enterFullscreenFocus">🔍 Fullscreen focus mode</button></div>`;
   } else {
     h += `<div class="card"><h3>Start a focus block</h3><div class="row wrap" style="margin:10px 0">${SUBS.map(s => `<span class="chip ${S.pickSub === s ? 'on' : ''}" data-act="pickSub" data-v="${s}">${s}</span>`).join('')}</div>
       <div class="row wrap" style="margin-bottom:10px">${[['timer', '⏳ Timer'], ['stopwatch', '⏱ Stopwatch']].map(([k, n]) => `<span class="chip ${S.pickMode === k ? 'on' : ''}" data-act="pickMode" data-v="${k}">${n}</span>`).join('')}</div>
-      ${S.pickMode === 'timer' ? `<div class="row wrap" style="margin-bottom:12px">${[25, 50, 90].map(d => `<span class="chip ${S.pickDur === d ? 'on' : ''}" data-act="pickDur" data-v="${d}">${d} min</span>`).join('')}</div>` : `<div class="xs mut" style="margin-bottom:12px">No countdown. Run it as long as you can, finish when you're done. 1 XP per minute, bonuses at 25 / 50 / 120 min. Counts as verified.</div>`}
+      ${S.pickMode === 'timer' ? `<div class="row wrap" style="margin-bottom:12px">${[25, 50, 90].map(d => `<span class="chip ${S.pickDur === d ? 'on' : ''}" data-act="pickDur" data-v="${d}">${d} min</span>`).join('')}</div>` : `<div class="xs mut" style="margin-bottom:12px">No countdown. Run it as long as you can, finish when you're done. 2 XP per minute, bonuses at 25 / 50 / 120 min. Counts as verified.</div>`}
       <button class="btn-p btn-xl" data-act="startTimer">▶ START ${S.pickSub.toUpperCase()}${S.pickMode === 'stopwatch' ? ' · STOPWATCH' : ''}</button>
       <button class="btn-xl" style="margin-top:8px;padding:12px;font-size:15px" data-act="start5">😮‍💨 Can't start? Just 5 minutes. That's the deal.</button>
+      <button class="btn-xl" style="margin-top:8px" data-act="openPomoModal">🍅 Pomodoro plan (auto work/break cycles)</button>
       <details><summary>Studied offline? Log it (counts half XP)</summary>
         <div class="row"><select id="mf_s">${SUBS.map(s => `<option ${s === S.pickSub ? 'selected' : ''}>${s}</option>`).join('')}</select><input id="mf_m" type="number" inputmode="numeric" placeholder="min" style="width:90px"><button data-act="manual">Log</button></div></details></div>`;
   }
@@ -455,6 +457,13 @@ const A = {
     const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, emoji: val('s_emo'), color: val('s_col') }); S.user = r.user; toast('Saved'); await go('me');
   },
   async notif() { if (!('Notification' in window)) return toast('Not supported here'); const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Alerts on while the app is open' : 'Blocked'); },
+  enterFullscreenFocus() { enterFullscreenFocus(); },
+  exitFullscreenFocus() { exitFullscreenFocus(); },
+  fsClockNext() { fsClockNext(); },
+  fsClockPrev() { fsClockPrev(); },
+  logAndExitFocus() { logAndExitFocus(); },
+  openPomoModal() { openPomoModal(); },
+  startPomo() { startPomo(); },
 };
 document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && A[el.dataset.act]) { e.preventDefault(); A[el.dataset.act](el, e); } });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && S.user === null && ($('#a_pin') === document.activeElement || $('#a_user') === document.activeElement)) A[S.authMode === 'login' ? 'login' : 'register'](); });
@@ -667,6 +676,280 @@ setInterval(async () => {
     if (S.tab === 'chat' && !CH.open && !document.hidden) { await chatLoadThreads(); render(); }
   } catch (e) { }
 }, 12000);
+
+/* ---------- fullscreen focus mode ---------- */
+const FULLSCREEN_CLOCKS = ['digital', 'analog', 'minimal', 'progress', 'orbit'];
+let fullscreenMode = null;
+let fullscreenClockType = 'digital';
+let fullscreenStartTime = 0;
+let fullscreenTargetMs = 0;
+let fullscreenTimerId = null;
+let fullscreenWakelock = null;
+let fullscreenNotificationsEnabled = false;
+
+function enterFullscreenFocus() {
+  if (!S.today?.timer) return;
+  fullscreenMode = true;
+  // Use local S.t0 which is kept in sync by tick(), not stale server elapsed
+  fullscreenStartTime = S.t0 || (Date.now() - (S.today.timer.elapsed * 1000));
+  fullscreenTargetMs = S.today.timer.target * 60 * 1000;
+  fullscreenClockType = 'digital';
+  requestWakeLock();
+  blockNotifications();
+  renderFullscreenFocus();
+}
+
+function exitFullscreenFocus() {
+  fullscreenMode = false;
+  releaseWakeLock();
+  unblockNotifications();
+  if (fullscreenTimerId) clearInterval(fullscreenTimerId);
+  fullscreenTimerId = null;
+  const fs = $('#fullscreen-focus-overlay');
+  if (fs) fs.remove();
+}
+
+function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    navigator.wakeLock.request('screen').then(wl => {
+      fullscreenWakelock = wl;
+      wl.addEventListener('release', () => { fullscreenWakelock = null; });
+    }).catch(() => {});
+  }
+}
+
+function releaseWakeLock() {
+  if (fullscreenWakelock) {
+    fullscreenWakelock.release().catch(() => {});
+    fullscreenWakelock = null;
+  }
+}
+
+function blockNotifications() {
+  fullscreenNotificationsEnabled = ('Notification' in window) && Notification.permission === 'granted';
+  if (fullscreenNotificationsEnabled && 'Notification' in window) {
+    // We can't truly block notifications, but we can suppress our own
+    // The server doesn't push notifications during focus anyway
+  }
+}
+
+function unblockNotifications() {
+  // Restore notification handling
+}
+
+function renderFullscreenFocus() {
+  const tm = S.today.timer;
+  const el = (Date.now() - fullscreenStartTime);
+  const target = tm.mode === 'stopwatch' ? Infinity : fullscreenTargetMs;
+  const rem = target - el;
+  const isStopwatch = tm.mode === 'stopwatch';
+  const progress = isStopwatch ? 0 : Math.max(0, Math.min(1, el / target));
+  const mins = Math.floor(el / 60000);
+  const secs = Math.floor((el % 60000) / 1000);
+  
+  const clockHtml = renderClock(fullscreenClockType, el, target, isStopwatch, mins, secs, progress);
+  const milestoneHtml = renderMilestones(mins);
+  
+  // Create or update overlay
+  let overlay = $('#fullscreen-focus-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'fullscreen-focus-overlay';
+    overlay.className = 'fullscreen-focus-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = `
+    <div id="fullscreen-focus" class="fullscreen-focus" data-clock="${fullscreenClockType}">
+      <div class="fs-header">
+        <div class="fs-subject">${esc(tm.subject)}</div>
+        <div class="fs-controls">
+          <button class="fs-btn" data-act="fsClockPrev" title="Previous clock">‹</button>
+          <span class="fs-clock-name">${fullscreenClockType}</span>
+          <button class="fs-btn" data-act="fsClockNext" title="Next clock">›</button>
+        </div>
+      </div>
+      <div class="fs-clock-area">${clockHtml}</div>
+      <div class="fs-milestones">${milestoneHtml}</div>
+      <div class="fs-footer">
+        <button class="fs-btn fs-btn-exit" data-act="exitFullscreenFocus">✕ Exit focus mode</button>
+        <button class="fs-btn fs-btn-log" data-act="logAndExitFocus">✅ Log & exit (${fm(Math.floor(el / 60000))})</button>
+      </div>
+    </div>
+  `;
+  
+  // Start the clock update loop ONLY ONCE
+  if (!fullscreenTimerId) {
+    fullscreenTimerId = setInterval(renderFullscreenFocus, isStopwatch ? 500 : 200);
+  }
+}
+
+function renderClock(type, elapsed, target, isStopwatch, mins, secs, progress) {
+  const hh = Math.floor(elapsed / 3600000);
+  const mm = Math.floor((elapsed % 3600000) / 60000);
+  const ss = Math.floor((elapsed % 60000) / 1000);
+  const timeStr = (hh ? String(hh).padStart(2, '0') + ':' : '') + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+  
+  switch (type) {
+    case 'digital':
+      return `<div class="fs-clock fs-digital"><div class="fs-time">${timeStr}</div><div class="fs-label">${isStopwatch ? 'Stopwatch' : 'Target: ' + fm(target / 60000)}</div></div>`;
+      
+    case 'analog':
+      const angle = isStopwatch ? (elapsed / 1000) % 60 / 60 * 360 : progress * 360;
+      return `<div class="fs-clock fs-analog">
+        <svg width="280" height="280" viewBox="0 0 280 280">
+          <circle cx="140" cy="140" r="120" stroke="#262638" stroke-width="16" fill="none"/>
+          <circle cx="140" cy="140" r="120" stroke="var(--acc)" stroke-width="16" fill="none" stroke-linecap="round" stroke-dasharray="754" stroke-dashoffset="${754 * (1 - progress)}" transform="rotate(-90 140 140)"/>
+          <circle cx="140" cy="140" r="8" fill="var(--acc)"/>
+        </svg>
+        <div class="fs-time-analog">${timeStr}</div>
+        <div class="fs-label">${isStopwatch ? 'Stopwatch' : 'Target: ' + fm(target / 60000)}</div>
+      </div>`;
+      
+    case 'minimal':
+      return `<div class="fs-clock fs-minimal">
+        <div class="fs-time-minimal">${timeStr}</div>
+        <div class="fs-bar-minimal"><i style="width:${Math.min(progress * 100, 100)}%"></i></div>
+        <div class="fs-label">${isStopwatch ? 'Stopwatch — no target' : 'Target: ' + fm(target / 60000) + ' · ' + Math.round(progress * 100) + '%'}</div>
+      </div>`;
+      
+    case 'progress':
+      const blocks = Math.ceil((target / 60000) / 25) || 1;
+      const completedBlocks = Math.floor(mins / 25);
+      let blocksHtml = '';
+      for (let i = 0; i < blocks; i++) {
+        const filled = i < completedBlocks;
+        const current = i === completedBlocks && !isStopwatch;
+        blocksHtml += '<div class="fs-block ' + (filled ? 'filled' : '') + ' ' + (current ? 'current' : '') + '"></div>';
+      }
+      return `<div class="fs-clock fs-progress">
+        <div class="fs-time">${timeStr}</div>
+        <div class="fs-blocks">${blocksHtml}</div>
+        <div class="fs-label">${isStopwatch ? 'Stopwatch' : completedBlocks + '/' + blocks + ' blocks (25 min each)'}</div>
+      </div>`;
+      
+    case 'orbit':
+      return `<div class="fs-clock fs-orbit">
+        <svg width="300" height="300" viewBox="0 0 300 300">
+          <circle cx="150" cy="150" r="130" stroke="#262638" stroke-width="4" fill="none" stroke-dasharray="8,8"/>
+          <circle cx="150" cy="150" r="130" stroke="var(--acc)" stroke-width="8" fill="none" stroke-linecap="round" stroke-dasharray="817" stroke-dashoffset="${817 * (1 - progress)}" transform="rotate(-90 150 150)"/>
+          ${!isStopwatch ? '<circle cx="150" cy="150" r="' + (130 - (progress * 50)) + '" stroke="var(--good)" stroke-width="2" fill="none" opacity="0.5"/>' : ''}
+        </svg>
+        <div class="fs-time-orbit">${timeStr}</div>
+        <div class="fs-label">${isStopwatch ? 'Orbit stopwatch' : 'Target: ' + fm(target / 60000)}</div>
+      </div>`;
+      
+    default:
+      return renderClock('digital', elapsed, target, isStopwatch, mins, secs, progress);
+  }
+}
+
+function renderMilestones(mins) {
+  const marks = [
+    [25, 'Clean-run zone: zero distractions = +20 XP'],
+    [50, 'Deep block unlocked (+100 XP). Keep going.'],
+    [90, 'Elite block (+220 XP). You\'re in the zone.'],
+    [120, 'MARATHON. +400 XP bonus locked in.'],
+    [180, 'Ragda Beast territory (+800 XP). Drink water.'],
+    [240, 'LEGEND. +1600 XP. Four hours straight.']
+  ];
+  const hit = marks.filter(m => mins >= m[0]).pop();
+  const next = marks.find(m => mins < m[0]);
+  
+  let html = '<div class="fs-milestone-row">';
+  marks.forEach(([m, label]) => {
+    const reached = mins >= m;
+    const current = !reached && next && m === next[0];
+    html += '<div class="fs-milestone ' + (reached ? 'reached' : '') + ' ' + (current ? 'current' : '') + '"><span class="fs-ms-num">' + m + '\'</span><span class="fs-ms-label">' + label + '</span></div>';
+  });
+  html += '</div>';
+  
+  if (hit) {
+    html += '<div class="fs-milestone-hit"><b>⚡ ' + hit[1] + '</b></div>';
+  }
+  return html;
+}
+
+function fsClockNext() {
+  const idx = FULLSCREEN_CLOCKS.indexOf(fullscreenClockType);
+  fullscreenClockType = FULLSCREEN_CLOCKS[(idx + 1) % FULLSCREEN_CLOCKS.length];
+  renderFullscreenFocus();
+}
+
+function fsClockPrev() {
+  const idx = FULLSCREEN_CLOCKS.indexOf(fullscreenClockType);
+  fullscreenClockType = FULLSCREEN_CLOCKS[(idx - 1 + FULLSCREEN_CLOCKS.length) % FULLSCREEN_CLOCKS.length];
+  renderFullscreenFocus();
+}
+
+function logAndExitFocus() {
+  // Stop the timer and log it
+  api('timer/stop', {}).then(r => {
+    if (r.too_short) {
+      toast('Under 5 minutes — not logged', 'Even 5 counts. Go again.');
+    } else {
+      if (r.capped) toast('Stopwatch capped at 4h', 'Anything past that does not count.');
+      if (r.minutes >= 25) beep();
+    }
+    exitFullscreenFocus();
+    go('today');
+  }).catch(() => {});
+}
+
+/* ---------- pomodoro UI ---------- */
+let pomoConfig = { total: 120, work: 50, brk: 10, long: 15, every: 3 };
+
+function openPomoModal() {
+  modal(`
+    <h2>🍅 Pomodoro Plan</h2>
+    <p class="sm mut">Set your daily focus target. The app breaks it into work/break cycles automatically.</p>
+    <label>Total focus time (minutes)</label>
+    <input id="pomo_total" type="number" inputmode="numeric" value="` + pomoConfig.total + `" min="30" max="720" step="15">
+    <label>Work block length (minutes)</label>
+    <input id="pomo_work" type="number" inputmode="numeric" value="` + pomoConfig.work + `" min="15" max="120" step="5">
+    <label>Short break (minutes)</label>
+    <input id="pomo_brk" type="number" inputmode="numeric" value="` + pomoConfig.brk + `" min="3" max="30" step="1">
+    <label>Long break (minutes)</label>
+    <input id="pomo_long" type="number" inputmode="numeric" value="` + pomoConfig.long + `" min="5" max="60" step="5">
+    <label>Long break every N blocks</label>
+    <input id="pomo_every" type="number" inputmode="numeric" value="` + pomoConfig.every + `" min="2" max="6" step="1">
+    <div class="row" style="margin-top:14px">
+      <button class="btn-p btn-xl grow" data-act="startPomo">Start plan (` + fm(pomoConfig.total) + `)</button>
+    </div>
+    <button class="btn-s" style="margin-top:8px;width:100%" data-act="closeModal">Cancel</button>
+  `);
+  
+  // Update preview when inputs change
+  ['pomo_total', 'pomo_work', 'pomo_brk', 'pomo_long', 'pomo_every'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updatePomoPreview);
+  });
+}
+
+function updatePomoPreview() {
+  pomoConfig = {
+    total: +val('pomo_total') || 120,
+    work: +val('pomo_work') || 50,
+    brk: +val('pomo_brk') || 10,
+    long: +val('pomo_long') || 15,
+    every: +val('pomo_every') || 3
+  };
+  const plan = pomoPlan(pomoConfig.total, pomoConfig.work);
+  const btn = document.querySelector('[data-act="startPomo"]');
+  if (btn) btn.textContent = 'Start plan (' + fm(pomoConfig.total) + ' · ' + plan.length + ' blocks)';
+}
+
+async function startPomo() {
+  pomoConfig = {
+    total: +val('pomo_total') || 120,
+    work: +val('pomo_work') || 50,
+    brk: +val('pomo_brk') || 10,
+    long: +val('pomo_long') || 15,
+    every: +val('pomo_every') || 3
+  };
+  await api('pomo/start', { subject: S.pickSub, total: pomoConfig.total, work: pomoConfig.work, brk: pomoConfig.brk, long: pomoConfig.long, every: pomoConfig.every });
+  closeModal();
+  await go('today');
+}
 
 /* ---------- admin dashboard (only for RAGDAMAXING_ADMINS) ---------- */
 const fmUp = s => s >= 86400 ? Math.floor(s / 86400) + 'd ' + Math.floor(s % 86400 / 3600) + 'h' : s >= 3600 ? Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm' : Math.floor(s / 60) + 'm';

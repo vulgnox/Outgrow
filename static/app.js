@@ -1,56 +1,126 @@
 'use strict';
 /* RAGDAMAXING front-end. Vanilla JS, no build step. */
 const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fm = m => { m = Math.round(m || 0); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`; };
+const pad = n => String(n).padStart(2, '0');
+const fm = m => { m = Math.round(m || 0); return m >= 60 ? `${Math.floor(m / 60)}h ${pad(m % 60)}m` : `${m}m`; };
+const clk = s => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return (h ? h + ':' + pad(m) : pad(m)) + ':' + pad(s % 60); };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const SUBS = ['Physics', 'Chemistry', 'Maths', 'English', 'Other'];
-const SCOL = { Physics: '#3ea6ff', Chemistry: '#22d3a6', Maths: '#ffb020', English: '#ff5c8a', Other: '#9aa0b4' };
-const S = { tab: 'today', sub: 'chapters', user: null, today: null, crew: null, syl: null, tests: null, ins: null, refl: null, weekly: null, pickSub: 'Physics', pickDur: 25, pickMode: 'timer', crewPeriod: 'week', sw: null, authMode: 'login', t0: 0, beeped: false, urge: null };
+const SCOL = { Physics: '#5aa9ff', Chemistry: '#34d3a0', Maths: '#f0b84a', English: '#f0709a', Other: '#9a9aa8' };
+const XPM = 2;                      // XP per verified minute (mirrors the server)
+const MS = [[25, 40, '25 min block'], [50, 100, 'Deep block'], [90, 220, 'Elite block'], [120, 400, 'Marathon'], [180, 800, 'Beast mode'], [240, 1600, 'Legend']];
+const RING = 590.6;                 // circumference of the r=94 timer ring
+
+const PREF = {
+  get(k, d) { try { const v = localStorage.getItem('rg_' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('rg_' + k, JSON.stringify(v)); } catch (e) { } },
+};
+const _pc = PREF.get('pomo', null);
+const S = {
+  tab: 'today', sub: 'chapters', user: null, today: null, crew: null, syl: null, tests: null, ins: null, refl: null, weekly: null,
+  pickSub: SUBS.includes(PREF.get('sub', '')) ? PREF.get('sub', '') : 'Physics',
+  pickDur: [25, 50, 90].includes(PREF.get('dur', 0)) ? PREF.get('dur', 25) : 25,
+  pickMode: ['timer', 'stopwatch', 'pomo'].includes(PREF.get('mode', '')) ? PREF.get('mode', '') : 'timer',
+  pomoCfg: _pc && +_pc.total && +_pc.work && +_pc.brk ? { total: +_pc.total, work: +_pc.work, brk: +_pc.brk } : { total: 120, work: 50, brk: 10 },
+  crewPeriod: 'week', authMode: 'login', t0: 0, p0: 0, urge: null, urgeTrig: '', fs: false, fsClock: PREF.get('clock', 'digital'),
+  lastPtr: 0, beepKey: null, beeped: false, msStep: 0, msgKey: '', syncing: 0,
+};
+
+/* ---------- icons (stroke, currentColor) ---------- */
+const IC = {
+  today: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  crew: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.2c2.5.3 4 2.2 4 5"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  study: '<path d="M4 5.5C4 4.7 4.7 4 5.5 4H12v16H5.5C4.7 20 4 19.3 4 18.5z"/><path d="M20 5.5c0-.8-.7-1.5-1.5-1.5H12v16h6.5c.8 0 1.5-.7 1.5-1.5z"/>',
+  reflect: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  me: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
+  flame: '<path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 1.5 1 2 1.5 2C10.5 8 11 5.5 12 3z"/>',
+  shield: '<path d="M12 3 5 6v6c0 4.4 3 7.3 7 9 4-1.7 7-4.6 7-9V6z"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  crown: '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/>',
+  left: '<path d="m15 5-7 7 7 7"/>', right: '<path d="m9 5 7 7-7 7"/>',
+  bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+};
+const ic = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
 
 /* ---------- api ---------- */
+function apiErr(msg) { const e = new Error(msg); e.api = true; return e; }
 async function api(path, body) {
-  const r = await fetch('/api/' + path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-  const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { S.user = null; renderAuth(); throw new Error('login'); }
-  if (!r.ok) { toast(j.error || 'Something broke', '', 'err'); throw new Error(j.error || 'error'); }
+  let r, j;
+  try {
+    r = await fetch('/api/' + path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    j = await r.json().catch(() => ({}));
+  } catch (e) { toast('No connection', 'Check your network and try again.', 'err'); throw apiErr('network'); }
+  const authCall = path === 'login' || path === 'register';
+  if (r.status === 401 && !authCall) { onLoggedOut(); throw apiErr('login'); }
+  if (!r.ok) { toast(j.error || 'Something went wrong', '', 'err'); throw apiErr(j.error || 'error'); }
   if (j.events && j.events.length) handleEvents(j.events);
   return j;
+}
+function onLoggedOut() {
+  S.user = null; S.ins = null; stopTick(); S.fs = false; $('#fs')?.remove(); document.body.classList.remove('noscroll');
+  try { chatReset(); } catch (e) { }
+  renderAuth();
 }
 
 /* ---------- feedback: toasts, confetti, sound ---------- */
 function toast(t, sub = '', cls = '') {
-  const d = document.createElement('div'); d.className = 'toast ' + cls; d.innerHTML = esc(t) + (sub ? `<small>${esc(sub)}</small>` : '');
-  $('#toasts').appendChild(d); setTimeout(() => d.remove(), 3700);
+  const box = $('#toasts'); if (!box) return;
+  const d = document.createElement('div'); d.className = 'toast ' + cls;
+  d.innerHTML = `<b>${esc(t)}</b>` + (sub ? `<small>${esc(sub)}</small>` : '');
+  box.appendChild(d); while (box.children.length > 3) box.firstChild.remove();
+  setTimeout(() => d.remove(), 3500);
 }
 function confetti() {
-  const cols = ['#7c5cff', '#22d3a6', '#ffb020', '#ff5c8a', '#3ea6ff'];
-  for (let i = 0; i < 46; i++) {
+  const cols = ['#7c6af7', '#a99cff', '#3dd6a0', '#f2b441', '#ececf1'];
+  for (let i = 0; i < 30; i++) {
     const s = document.createElement('i'); s.className = 'confetti';
-    s.style.left = Math.random() * 100 + 'vw'; s.style.background = cols[i % 5]; s.style.animationDelay = Math.random() * .6 + 's'; s.style.transform = `rotate(${Math.random() * 360}deg)`;
-    document.body.appendChild(s); setTimeout(() => s.remove(), 3200);
+    s.style.left = Math.random() * 100 + 'vw'; s.style.background = cols[i % cols.length]; s.style.animationDelay = Math.random() * .5 + 's';
+    document.body.appendChild(s); setTimeout(() => s.remove(), 3000);
   }
 }
+let _ac = null;
 function beep() {
   try {
-    const a = new (window.AudioContext || window.webkitAudioContext)();
-    [0, .22, .44].forEach((t, i) => { const o = a.createOscillator(), g = a.createGain(); o.frequency.value = 660 + i * 220; g.gain.value = .16; o.connect(g); g.connect(a.destination); o.start(a.currentTime + t); o.stop(a.currentTime + t + .16); });
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    _ac = _ac || new (window.AudioContext || window.webkitAudioContext)();
+    if (_ac.state === 'suspended') _ac.resume();
+    [0, .2, .4].forEach((t, i) => { const o = _ac.createOscillator(), g = _ac.createGain(); o.frequency.value = 620 + i * 180; g.gain.value = .12; o.connect(g); g.connect(_ac.destination); o.start(_ac.currentTime + t); o.stop(_ac.currentTime + t + .14); });
+    if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
   } catch (e) { }
 }
 function handleEvents(evs) {
   const xp = evs.filter(e => e.t === 'xp');
-  if (xp.length) { const sum = xp.reduce((a, e) => a + e.amount, 0); toast(`+${sum} XP`, xp.slice(0, 3).map(e => e.label).join(' · ')); }
+  if (xp.length) {
+    const sum = xp.reduce((a, e) => a + e.amount, 0), labs = xp.map(e => e.label);
+    toast(`${sum >= 0 ? '+' : ''}${sum} XP`, labs.slice(0, 2).join(' · ') + (labs.length > 2 ? ` · +${labs.length - 2} more` : ''), 'xp');
+    const b = $('.xp>i'); if (b) { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
+  }
+  evs.filter(e => e.t === 'info').forEach(e => toast(e.text));
   evs.filter(e => e.t === 'badge').forEach(e => { toast(`${e.emoji} ${e.name}`, e.desc, 'badge'); confetti(); });
   const lu = evs.find(e => e.t === 'levelup');
-  if (lu) { confetti(); modal(`<div class="c"><div class="big">LEVEL ${lu.level}</div><div style="font-size:54px;margin:6px 0">${lu.emoji || ''}</div><h2 style="color:var(--acc2)">${esc(lu.rank)}</h2>${lu.new_title ? '<div class="pill" style="display:inline-block;margin:6px 0">NEW TITLE UNLOCKED</div>' : ''}<p class="mut">Another vote for the person you're becoming.</p><button class="btn-p btn-xl" data-act="closeModal">Keep going</button></div>`); }
+  if (lu) {
+    confetti();
+    modal(`<div class="c lvl"><div class="xs mut up">LEVEL UP</div><div class="bignum">${lu.level}</div><div class="lvl-emo">${esc(lu.emoji || '')}</div><h2>${esc(lu.rank)}</h2>${lu.new_title ? '<div class="pill mt8">New title unlocked</div>' : ''}<p class="sm mut mt12">Another vote for the person you're becoming.</p><button class="btn-p btn-xl mt12" data-act="closeModal">Keep going</button></div>`);
+  }
 }
-function modal(html) { const m = $('#modal'); m.innerHTML = `<div>${html}</div>`; m.classList.remove('hidden'); }
-function closeModal() { $('#modal').classList.add('hidden'); $('#modal').innerHTML = ''; }
+function modal(html, lock) {
+  const m = $('#modal'); m.innerHTML = `<div role="dialog">${html}</div>`;
+  m.classList.toggle('lock', !!lock); m.classList.remove('hidden'); document.body.classList.add('noscroll');
+}
+function closeModal() {
+  const m = $('#modal'); m.classList.add('hidden'); m.classList.remove('lock'); m.innerHTML = '';
+  if (!S.fs) document.body.classList.remove('noscroll');
+}
+const modalOpen = () => !$('#modal').classList.contains('hidden');
 
 /* ---------- svg helpers ---------- */
 function bars(vals, color, h = 70) {
   const mx = Math.max(...vals, 1), w = 100 / vals.length;
-  return `<svg class="chart" viewBox="0 0 100 ${h}" preserveAspectRatio="none">` + vals.map((v, i) => { const bh = Math.max(v / mx * (h - 2), v ? 2 : 1); return `<rect x="${i * w + w * .15}" y="${h - bh}" width="${w * .7}" height="${bh}" rx="1" fill="${color}" opacity="${v ? 1 : .2}"/>`; }).join('') + '</svg>';
+  return `<svg class="chart" viewBox="0 0 100 ${h}" preserveAspectRatio="none">` + vals.map((v, i) => { const bh = Math.max(v / mx * (h - 2), v ? 2 : 1); return `<rect x="${i * w + w * .15}" y="${h - bh}" width="${w * .7}" height="${bh}" rx="1" fill="${color}" opacity="${v ? 1 : .18}"/>`; }).join('') + '</svg>';
 }
 function lines(series, h = 60) {
   const all = series.flatMap(s => s.v.filter(x => x != null)); const mx = Math.max(...all, 1);
@@ -60,19 +130,80 @@ function lines(series, h = 60) {
   }).join('') + '</svg>';
 }
 
+/* ---------- small ui pieces ---------- */
+const lbl = (t, right = '') => `<div class="lbl"><span>${t}</span>${right ? `<span class="rt">${right}</span>` : ''}</div>`;
+const seg = (items, cur, act) => `<div class="seg">${items.map(([k, n]) => `<button class="${cur === k ? 'on' : ''}" data-act="${act}" data-v="${esc(k)}">${n}</button>`).join('')}</div>`;
+const ago = ts => { const s = (Date.now() - new Date(ts).getTime()) / 1000; if (s < 90) return 'now'; if (s < 3600) return Math.floor(s / 60) + 'm'; if (s < 86400) return Math.floor(s / 3600) + 'h'; return Math.floor(s / 86400) + 'd'; };
+const avatar = (emo, col, cls = '') => `<div class="av ${cls}" style="background:${esc(col)}22;border-color:${esc(col)}">${esc(emo)}</div>`;
+
 /* ---------- auth ---------- */
 function renderAuth() {
   const reg = S.authMode === 'register';
   $('#app').innerHTML = `<div class="auth"><div class="logo">RAGDAMAXING</div>
-  <p class="mut">The old you was an A+ student. The new you ragdamaxes. Track it. Prove it. Together.</p>
+  <p class="tag">Outwork the old you. Track it, prove it, together.</p>
   <div class="card col">
-    <input id="a_user" placeholder="Username" autocapitalize="off" autocomplete="username">
-    <input id="a_pin" type="password" placeholder="PIN / password (4+ chars)" autocomplete="${reg ? 'new-password' : 'current-password'}">
-    ${reg ? `<input id="a_code" placeholder="Crew invite code (from a friend)" autocapitalize="characters"><div class="mut sm c">— or —</div><input id="a_cname" placeholder="Start a new crew (name)">` : ''}
+    <input id="a_user" placeholder="Username" autocapitalize="off" autocomplete="username" spellcheck="false">
+    <input id="a_pin" type="password" placeholder="PIN or password (4+ characters)" autocomplete="${reg ? 'new-password' : 'current-password'}">
+    ${reg ? `<input id="a_code" placeholder="Crew invite code" autocapitalize="characters" spellcheck="false"><div class="mut xs c">or start your own</div><input id="a_cname" placeholder="New crew name">` : ''}
     <button class="btn-p btn-xl" data-act="${reg ? 'register' : 'login'}">${reg ? 'Join the grind' : 'Log in'}</button>
-    <button data-act="authMode">${reg ? 'I already have an account' : 'New here? Create account'}</button>
+    <button class="btn-text" data-act="authMode">${reg ? 'I already have an account' : 'New here? Create an account'}</button>
   </div></div>`;
-  $('#modal').classList.add('hidden'); document.querySelector('.nav')?.remove();
+  closeModal(); $('.nav')?.remove(); $('.fab')?.remove();
+}
+
+/* ---------- navigation + rendering ---------- */
+const TABS = [['today', 'today', 'Today'], ['crew', 'crew', 'Crew'], ['chat', 'chat', 'Chat'], ['study', 'study', 'Study'], ['reflect', 'reflect', 'Reflect'], ['me', 'me', 'Me']];
+let _navSeq = 0;
+async function loadTab(tab) {
+  if (tab === 'today') setToday(await api('today'));
+  else if (tab === 'crew') S.crew = await api('crew');
+  else if (tab === 'study') {
+    const [syl, te] = await Promise.all([api('syllabus'), api('tests')]); S.syl = syl; S.tests = te;
+    if (!S.ins) S.ins = await api('insights');
+  }
+  else if (tab === 'reflect') { const [r, w] = await Promise.all([api('reflect'), api('weekly')]); S.refl = r; S.weekly = w; }
+  else if (tab === 'me') S.ins = await api('insights');
+  else if (tab === 'chat') await chatLoadThreads();
+}
+async function go(tab) {
+  const changed = tab !== S.tab, seq = ++_navSeq;
+  S.tab = tab; chatStop(); if (tab === 'chat') CH.open = null;
+  try { await loadTab(tab); } catch (e) { if (e.message === 'login') return; }
+  if (seq !== _navSeq) return;
+  render(); if (changed) window.scrollTo(0, 0);
+}
+/* reload the current tab's data and redraw WITHOUT jumping the page back to the top */
+async function refresh() {
+  const seq = ++_navSeq;
+  try { await loadTab(S.tab); } catch (e) { if (e.message === 'login') return; }
+  if (seq !== _navSeq) return;
+  render();
+}
+function ensureNav() {
+  let nav = $('.nav');
+  if (!nav) {
+    nav = document.createElement('nav'); nav.className = 'nav';
+    nav.innerHTML = '<div>' + TABS.map(t => `<button data-act="tab" data-v="${t[0]}">${ic(t[1], 21)}<span>${t[2]}</span></button>`).join('') + '</div>';
+    document.body.appendChild(nav);
+  }
+  $$('.nav button').forEach(b => b.classList.toggle('on', b.dataset.v === S.tab));
+  chatBadge();
+}
+function render() {
+  if (!S.user) return renderAuth();
+  const y = window.scrollY, openK = $$('details[open][data-k]').map(d => d.dataset.k);
+  const views = { today: vToday, crew: vCrew, chat: vChat, study: vStudy, reflect: vReflect, me: vMe };
+  let v;
+  try { v = views[S.tab](); }
+  catch (e) { console.error(e); v = '<section class="card c"><div class="b">This tab hit a snag.</div><p class="sm mut">Reload to try again.</p><button class="btn-s" data-act="reload">Reload</button></section>'; }
+  $('#app').innerHTML = v;
+  $('.fab')?.remove();
+  if (S.tab === 'today' && S.today && !S.fs) { const f = document.createElement('button'); f.className = 'fab'; f.dataset.act = 'urge'; f.textContent = "I'm tempted"; document.body.appendChild(f); }
+  openK.forEach(k => { const d = document.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; });
+  ensureNav();
+  if (S.tab === 'chat') chatAfterRender();
+  if (S.tab === 'today') startTick(); else stopTick();
+  if (S.tab !== 'chat') window.scrollTo(0, y);
 }
 
 /* ---------- boot ---------- */
@@ -80,143 +211,291 @@ async function boot() {
   try { const me = await api('me'); S.user = me.user; await go(S.tab); if (!S.user.onboarded) onboard(); }
   catch (e) { if (!S.user) renderAuth(); }
 }
-async function go(tab) {
-  S.tab = tab;
-  chatStop(); if (tab === 'chat') CH.open = null;
-  try {
-    if (tab === 'today') S.today = await api('today');
-    if (tab === 'crew') S.crew = await api('crew');
-    if (tab === 'study') {
-      const [syl, te] = await Promise.all([api('syllabus'), api('tests')]); S.syl = syl; S.tests = te;
-      S.ins = S.ins || await api('insights');
-    }
-    if (tab === 'reflect') { const [r, w] = await Promise.all([api('reflect'), api('weekly')]); S.refl = r; S.weekly = w; }
-    if (tab === 'me') S.ins = await api('insights');
-    if (tab === 'chat') await chatLoadThreads();
-  } catch (e) { if (e.message === 'login') return; }
-  render(); window.scrollTo(0, 0);
+/* ---------- timer engine ---------- */
+function setToday(t) {
+  S.today = t; const n = Date.now();
+  S.t0 = t.timer ? n - t.timer.elapsed * 1000 : 0;
+  S.p0 = t.pomo ? n - t.pomo.elapsed * 1000 : 0;
 }
-function render() {
-  if (!S.user) return renderAuth();
-  const v = { today: vToday, crew: vCrew, chat: vChat, study: vStudy, reflect: vReflect, me: vMe }[S.tab]();
-  const tabs = [['today', '⚡', 'Today'], ['crew', '👥', 'Crew'], ['chat', '💬', 'Chat'], ['study', '📚', 'Study'], ['reflect', '🪞', 'Reflect'], ['me', '🧬', 'Me']];
-  $('#app').innerHTML = v + (S.tab === 'today' ? '<button class="fab" data-act="urge">🧠 I\'m tempted</button>' : '');
-  document.querySelector('.nav')?.remove();
-  const nav = document.createElement('div'); nav.className = 'nav';
-  nav.innerHTML = '<div>' + tabs.map(t => `<button class="${S.tab === t[0] ? 'on' : ''}" data-act="tab" data-v="${t[0]}"><span>${t[1]}</span>${t[2]}${t[0] === 'chat' && CH.total ? `<i class="nb">${CH.total > 9 ? '9+' : CH.total}</i>` : ''}</button>`).join('') + '</div>';
-  document.body.appendChild(nav);
-  if (S.tab === 'chat') chatAfterRender();
-  if (S.tab === 'today' && S.today?.timer) { S.t0 = Date.now() - S.today.timer.elapsed * 1000; S.beeped = S.today.timer.elapsed >= S.today.timer.target * 60; const m0 = Math.floor(S.today.timer.elapsed / 60); S.sw = [25, 50, 120, 180].filter(x => m0 >= x).pop() || null; tick(); }
+/* single source of truth for "what is the clock doing right now" (null = nothing running) */
+function timerState() {
+  const T = S.today; if (!T) return null;
+  const tm = T.timer, po = T.pomo, n = Date.now();
+  if (tm) {
+    const sw = tm.mode === 'stopwatch', el = (n - S.t0) / 1000, tot = sw ? 0 : tm.target * 60;
+    return { kind: sw ? 'stopwatch' : 'work', subject: tm.subject, el, tot, rem: tot - el, sw, tm, po, key: 't' + tm.started };
+  }
+  if (po && po.phase === 'break') {
+    const el = (n - S.p0) / 1000;
+    return { kind: 'break', subject: po.subject, el, tot: po.phase_len, rem: po.phase_len - el, sw: false, tm: null, po, key: 'b' + po.block };
+  }
+  return null;
+}
+const msStep = mins => MS.filter(m => mins >= m[0]).length;
+function startTick() { stopTick(); tickOnce(); }
+function stopTick() { clearTimeout(S._tt); S._tt = null; }
+function tickOnce() {
+  clearTimeout(S._tt);
+  if (!S.user || !S.today) return;
+  if (S.tab !== 'today' && !S.fs) return;
+  const st = timerState();
+  if (!st) { if (S.fs) { exitFullscreenFocus(true); if (S.tab === 'today') render(); } return; }
+  paintTimer(st);
+  S._tt = setTimeout(tickOnce, S.fs ? 250 : 500);
+}
+function timerMsg(st, mins) {
+  const po = st.po;
+  if (st.kind === 'break') return st.rem > 0 ? ['brk', 'Step away from the screen. Water, stretch, eyes off.'] : ['brk0', 'Break over. Next block is starting…'];
+  if (st.kind === 'stopwatch') {
+    const step = msStep(mins), hit = MS[step - 1], nx = MS[step];
+    if (!step) return ['sw0', `First milestone at 25 min (+${MS[0][1]} XP). Zero distractions to 25 = +20 XP.`];
+    return ['sw' + step, `<b>${hit[2]}</b> reached, +${hit[1]} XP banked.${nx ? ` Next: ${nx[0]} min.` : ' You are at the cap. Log it.'}`];
+  }
+  if (st.rem > 0) return ['run', po ? 'Stay on this one. Your break is next.' : 'Phone away. One tab. Pen in hand.'];
+  return po ? ['done', 'Block complete. Logging it and starting your break…']
+    : ['done', 'Block complete. Log it, or <button class="btn-s" data-act="extend">Keep going +20 min</button>'];
+}
+function paintTimer(st) {
+  const mins = Math.floor(st.el / 60);
+  if (S.beepKey !== st.key) { S.beepKey = st.key; S.beeped = !st.sw && st.rem <= 0; S.msStep = st.sw ? msStep(mins) : 0; S.msgKey = ''; }
+  if (st.sw) { const step = msStep(mins); if (step > S.msStep) { S.msStep = step; beep(); } }
+  else if (st.rem <= 0) {
+    if (!S.beeped) { S.beeped = true; beep(); }
+    if (st.po && st.rem <= -1) syncToday();     // pomodoro: the server logs the block and starts the break / next block
+  }
+  const time = st.sw ? clk(st.el) : st.kind === 'break' ? clk(Math.max(st.rem, 0)) : st.rem >= 0 ? clk(st.rem) : '+' + clk(-st.rem);
+  const frac = st.sw ? (st.el % 3600) / 3600 : clamp(st.el / st.tot, 0, 1);
+  const c = $('#clock'); if (c) c.textContent = time;
+  const rg = $('#ringc'); if (rg) rg.style.strokeDashoffset = RING * (1 - frac);
+  const sub = st.kind === 'stopwatch' ? `${mins} min · ${mins * XPM} XP banked`
+    : st.kind === 'break' ? `Block ${st.po.block} of ${st.po.blocks} done`
+      : st.rem < 0 ? 'Overtime · bonus focus' : `${mins} min in${st.po ? ` · block ${st.po.block} of ${st.po.blocks}` : ''}`;
+  const ts = $('#tsub'); if (ts) ts.textContent = sub;
+  const [mk, mh] = timerMsg(st, mins);
+  if (mk !== S.msgKey) { S.msgKey = mk; const tmg = $('#tmsg'); if (tmg) tmg.innerHTML = mh; }
+  if (S.fs) paintFS(st, time, frac, mins, mk, mh);
+}
+async function syncToday() {
+  if (Date.now() - S.syncing < 4000) return;
+  S.syncing = Date.now();
+  try {
+    setToday(await api('today'));
+    if (S.fs) { const st = timerState(); if (!st) exitFullscreenFocus(true); else { S.fsKey = ''; } }
+    if (S.tab === 'today') render();
+  } catch (e) { }
+}
+async function finishTimer(body) {
+  const r = await api('timer/stop', body || {});
+  if (r.discarded) { /* nothing to log */ }
+  else if (r.too_short) toast('Under 5 minutes, not logged', 'Even 5 counts. Go again.');
+  else { if (r.capped) toast('Stopwatch capped at 4h', 'Time past that does not count.'); if (r.minutes >= 25) beep(); }
+  S.beepKey = null;
+  try { setToday(await api('today')); } catch (e) { }
+  exitFullscreenFocus(true);
+  render();
+  return r;
 }
 
+/* ---------- fullscreen focus mode ---------- */
+const FS_CLOCKS = [['digital', 'Digital'], ['analog', 'Dial'], ['minimal', 'Minimal'], ['progress', 'Blocks'], ['orbit', 'Orbit']];
+let fsWake = null;
+async function requestWakeLock() {
+  try { if ('wakeLock' in navigator && !fsWake && S.fs) { fsWake = await navigator.wakeLock.request('screen'); fsWake.addEventListener('release', () => { fsWake = null; }); } } catch (e) { fsWake = null; }
+}
+function releaseWakeLock() { try { if (fsWake) fsWake.release().catch(() => { }); } catch (e) { } fsWake = null; }
+
+function enterFullscreenFocus() {
+  const st = timerState(); if (!st) return;
+  if (!FS_CLOCKS.some(c => c[0] === S.fsClock)) S.fsClock = 'digital';
+  S.fs = true; S.fsKey = ''; S.fsClockKey = '';
+  $('.fab')?.remove(); document.body.classList.add('noscroll');
+  let o = $('#fs'); if (o) o.remove();
+  o = document.createElement('div'); o.id = 'fs'; o.className = 'fs';
+  o.innerHTML = `<div class="fs-top"><div class="fs-sub"><i class="sd" id="fs-dot"></i><span id="fs-subj"></span><span class="pill" id="fs-blk"></span></div>
+    <div class="fs-style"><button data-act="fsClockPrev" aria-label="Previous clock style">${ic('left', 16)}</button><span id="fs-cname"></span><button data-act="fsClockNext" aria-label="Next clock style">${ic('right', 16)}</button></div>
+    <button class="fs-x" data-act="exitFullscreenFocus" aria-label="Exit focus mode">${ic('x', 20)}</button></div>
+    <div class="fs-center" id="fs-clock"></div><div class="fs-next" id="fs-next"></div><div class="fs-bot" id="fs-bot"></div>`;
+  document.body.appendChild(o);
+  S.fsNative = false;
+  try { const p = o.requestFullscreen && o.requestFullscreen({ navigationUI: 'hide' }); if (p && p.then) p.then(() => { S.fsNative = true; }).catch(() => { }); } catch (e) { }
+  const wake = () => { o.classList.remove('idle'); clearTimeout(S._fsHide); S._fsHide = setTimeout(() => o.classList.add('idle'), 5000); };
+  ['pointermove', 'pointerdown', 'keydown'].forEach(ev => o.addEventListener(ev, wake)); wake();
+  let sx = null; const ca = $('#fs-clock');
+  ca.addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, { passive: true });
+  ca.addEventListener('touchend', e => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 60) fsStep(dx < 0 ? 1 : -1); }, { passive: true });
+  requestWakeLock(); startTick();
+}
+function exitFullscreenFocus(noRender) {
+  if (!S.fs) return;
+  S.fs = false; clearTimeout(S._fsHide); releaseWakeLock();
+  $('#fs')?.remove(); if (!modalOpen()) document.body.classList.remove('noscroll');
+  if (document.fullscreenElement) { try { document.exitFullscreen().catch(() => { }); } catch (e) { } }
+  if (noRender !== true && S.user && S.tab === 'today') render();
+}
+function fsStep(d) {
+  const i = FS_CLOCKS.findIndex(c => c[0] === S.fsClock);
+  S.fsClock = FS_CLOCKS[(i + d + FS_CLOCKS.length) % FS_CLOCKS.length][0]; PREF.set('clock', S.fsClock); S.fsClockKey = '';
+  const st = timerState(); if (st) tickOnce();
+}
+function fsDial() {
+  let t = ''; for (let i = 0; i < 60; i++) { const a = i * 6 * Math.PI / 180, r1 = i % 5 ? 112 : 104, s = Math.sin(a), c = -Math.cos(a); t += `<line x1="${(140 + 118 * s).toFixed(1)}" y1="${(140 + 118 * c).toFixed(1)}" x2="${(140 + r1 * s).toFixed(1)}" y2="${(140 + r1 * c).toFixed(1)}"/>`; }
+  return t;
+}
+function fsBuildClock(type, st) {
+  const lab = '<div class="fs-label" id="fs-label"></div>';
+  if (type === 'analog') return `<div class="fsc analog"><svg viewBox="0 0 280 280" class="fs-svg"><g class="ticks">${fsDial()}</g><circle class="trk" cx="140" cy="140" r="92" fill="none"/><circle id="fs-arc" class="arc" cx="140" cy="140" r="92" fill="none" stroke-dasharray="578.1" stroke-dashoffset="578.1" transform="rotate(-90 140 140)"/><line id="fs-hand" class="hand" x1="140" y1="140" x2="140" y2="58" transform="rotate(0 140 140)"/><circle cx="140" cy="140" r="5" class="pivot"/></svg><div class="fs-time" id="fs-time"></div>${lab}</div>`;
+  if (type === 'minimal') return `<div class="fsc minimal"><div class="fs-time" id="fs-time"></div><div class="fs-line"><i id="fs-bar"></i></div>${lab}</div>`;
+  if (type === 'progress') {
+    const n = st.sw ? 10 : Math.max(1, Math.min(24, Math.ceil(st.tot / 1500)));
+    return `<div class="fsc progress"><div class="fs-time" id="fs-time"></div><div class="fs-blocks" id="fs-blocks">${'<i></i>'.repeat(n)}</div>${lab}</div>`;
+  }
+  if (type === 'orbit') return `<div class="fsc orbit"><svg viewBox="0 0 300 300" class="fs-svg"><circle class="trk dash" cx="150" cy="150" r="130" fill="none"/><circle id="fs-arc" class="arc" cx="150" cy="150" r="130" fill="none" stroke-dasharray="816.8" stroke-dashoffset="816.8" transform="rotate(-90 150 150)"/><g id="fs-orb" transform="rotate(0 150 150)"><circle class="orb" cx="150" cy="20" r="7"/></g><circle id="fs-pulse" class="pulse" cx="150" cy="150" r="100" fill="none"/></svg><div class="fs-time" id="fs-time"></div>${lab}</div>`;
+  return `<div class="fsc digital"><div class="fs-time big" id="fs-time"></div>${lab}</div>`;
+}
+function fsBotHtml(st) {
+  const po = st.po;
+  if (st.kind === 'break') return '<button class="fs-btn" data-act="skipBreak">Skip break</button><button class="fs-btn" data-act="endPlan">End plan</button>';
+  return `<button class="fs-btn" data-act="distract">Lost focus (<span id="fs-dcount">${st.tm.distractions}</span>)</button><button class="fs-btn primary" data-act="logAndExitFocus">${po ? 'End plan & log' : 'Log & exit'}</button>`;
+}
+function paintFS(st, time, frac, mins, mk, mh) {
+  const root = $('#fs'); if (!root) return;
+  const col = SCOL[st.subject] || '#9a9aa8';
+  root.style.setProperty('--sc', col); root.dataset.kind = st.kind; root.dataset.over = (!st.sw && st.rem < 0 && st.kind !== 'break') ? '1' : '0';
+  const setT = (id, v) => { const e = $(id); if (e && e.textContent !== v) e.textContent = v; };
+  setT('#fs-subj', st.kind === 'break' ? 'Break' : st.subject);
+  setT('#fs-blk', st.po ? `Block ${st.po.block}/${st.po.blocks}` : '');
+  const blk = $('#fs-blk'); if (blk) blk.style.display = st.po ? '' : 'none';
+  setT('#fs-cname', (FS_CLOCKS.find(c => c[0] === S.fsClock) || FS_CLOCKS[0])[1]);
+  if (S.fsClockKey !== S.fsClock + st.kind + st.key) { S.fsClockKey = S.fsClock + st.kind + st.key; $('#fs-clock').innerHTML = fsBuildClock(S.fsClock, st); root.dataset.clock = S.fsClock; }
+  if (S.fsKey !== st.key + st.kind) { S.fsKey = st.key + st.kind; $('#fs-bot').innerHTML = fsBotHtml(st); }
+  setT('#fs-time', time);
+  const label = st.kind === 'stopwatch' ? `Stopwatch · ${mins} min · ${mins * XPM} XP banked`
+    : st.kind === 'break' ? `${st.po.is_long ? 'Long break' : 'Short break'} · next block ${st.po.next_len} min`
+      : st.rem < 0 ? 'Overtime' : `${mins} of ${st.tm.target} min`;
+  setT('#fs-label', label);
+  const arc = $('#fs-arc'); if (arc) { const C = +arc.getAttribute('stroke-dasharray'); arc.style.strokeDashoffset = C * (1 - frac); }
+  const hand = $('#fs-hand'); if (hand) hand.setAttribute('transform', `rotate(${(frac * 360).toFixed(2)} 140 140)`);
+  const orb = $('#fs-orb'); if (orb) orb.setAttribute('transform', `rotate(${(frac * 360).toFixed(2)} 150 150)`);
+  const pu = $('#fs-pulse'); if (pu) pu.setAttribute('r', (60 + 40 * (st.sw ? (st.el % 60) / 60 : 1 - frac)).toFixed(1));
+  const bar = $('#fs-bar'); if (bar) bar.style.width = (frac * 100).toFixed(2) + '%';
+  const bl = $('#fs-blocks'); if (bl) { const done = Math.floor(st.el / 1500); Array.from(bl.children).forEach((b, i) => { b.className = i < done ? 'on' : i === done ? 'cur' : ''; if (i === done && st.tot) b.style.setProperty('--p', clamp((st.el - i * 1500) / Math.min(1500, st.tot - i * 1500 || 1500), 0, 1)); }); }
+  let nx = '';
+  if (st.kind === 'break') nx = `${st.po.done} of ${st.po.total} min done · ${fm(st.po.total - st.po.done)} to go`;
+  else {
+    const lim = st.sw ? 241 : st.tot / 60, next = MS.find(m => mins < m[0] && m[0] <= lim);
+    nx = next ? `Next · ${next[2]} at ${next[0]} min · +${next[1]} XP` : (st.sw ? 'Every milestone reached. Log it when you are done.' : 'Block target reached');
+  }
+  setT('#fs-next', nx);
+}
+
+/* ---------- pomodoro helpers (mirror the server so the preview is honest) ---------- */
+function pomoPlan(total, work) { const out = []; let rem = total; while (rem >= 5) { const n = rem - work < 5 ? rem : work; out.push(n); rem -= n; } return out; }
+function pomoNorm(c) { return { total: clamp(Math.round(+c.total) || 120, 30, 720), work: clamp(Math.round(+c.work) || 50, 15, 120), brk: clamp(Math.round(+c.brk) || 10, 3, 30) }; }
+function pomoCalc(c) {
+  const plan = pomoPlan(c.total, c.work), every = c.work <= 30 ? 4 : 3, long = Math.max(c.brk * 2, 15);
+  let wall = c.total; for (let i = 1; i < plan.length; i++) wall += (i % every === 0 ? long : c.brk);
+  return { plan, every, long, wall };
+}
+function pomoPrev() { const c = pomoNorm(S.pomoCfg), p = pomoCalc(c); return `${p.plan.length} block${p.plan.length === 1 ? '' : 's'} · ${c.work} min work · ${c.brk} min break (${p.long} min every ${p.every}) · about ${fm(p.wall)} on the clock`; }
 /* ---------- TODAY ---------- */
+function focusIdle() {
+  const mode = S.pickMode, sub = S.pickSub;
+  let body, label;
+  if (mode === 'timer') { body = `<div class="xs mut mb4">Length</div>${seg([[25, '25 min'], [50, '50 min'], [90, '90 min']], S.pickDur, 'pickDur')}`; label = `Start ${sub} · ${S.pickDur} min`; }
+  else if (mode === 'stopwatch') { body = `<p class="sm mut">No countdown. Go as long as you can and finish when you're done. ${XPM} XP per minute, with milestone bonuses at 25, 50, 90, 120, 180 and 240 min. Counts as verified.</p>`; label = `Start ${sub} · stopwatch`; }
+  else {
+    const c = S.pomoCfg;
+    body = `<div class="grid3"><div><label>Total (min)</label><input id="pomo_total" type="number" inputmode="numeric" value="${c.total}" min="30" max="720" step="15"></div>
+      <div><label>Work (min)</label><input id="pomo_work" type="number" inputmode="numeric" value="${c.work}" min="15" max="120" step="5"></div>
+      <div><label>Break (min)</label><input id="pomo_brk" type="number" inputmode="numeric" value="${c.brk}" min="3" max="30" step="1"></div></div>
+      <div class="sm mut mt8" id="pomo_prev">${pomoPrev()}</div>`;
+    label = `Start pomodoro · ${fm(pomoNorm(c).total)}`;
+  }
+  return `<section class="card focus">${lbl('Focus')}
+    <div class="chips">${SUBS.map(s => `<button class="chip ${sub === s ? 'on' : ''}" data-act="pickSub" data-v="${s}"><i class="sd" style="background:${SCOL[s]}"></i>${s}</button>`).join('')}</div>
+    <div class="mt12">${seg([['timer', 'Timer'], ['stopwatch', 'Stopwatch'], ['pomo', 'Pomodoro']], mode, 'pickMode')}</div>
+    <div class="mt12">${body}</div>
+    <button class="btn-p btn-xl mt12" data-act="${mode === 'pomo' ? 'startPomo' : 'startTimer'}">${esc(label)}</button>
+    <button class="btn-text" data-act="start5">Can't start? Just 5 minutes. That's the deal.</button>
+    <details data-k="manual"><summary>Studied offline? Log it (half XP)</summary>
+      <div class="row g8 mt8"><select id="mf_s">${SUBS.map(s => `<option ${s === sub ? 'selected' : ''}>${s}</option>`).join('')}</select><input id="mf_m" type="number" inputmode="numeric" placeholder="min" style="width:96px"><button data-act="manual">Log</button></div></details></section>`;
+}
+function ringSvg(col) {
+  return `<div class="ring"><svg width="210" height="210" viewBox="0 0 210 210"><circle class="rt" cx="105" cy="105" r="94" fill="none" stroke-width="10"/><circle id="ringc" class="rp" cx="105" cy="105" r="94" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${RING}" stroke-dashoffset="${RING}"/></svg>
+    <div class="in"><div class="clock" id="clock">--:--</div><div class="xs mut" id="tsub"></div></div></div>`;
+}
+function focusRun(st) {
+  const tm = st.tm, po = st.po, col = SCOL[st.subject] || '#9a9aa8';
+  const tag = st.sw ? 'Stopwatch' : po ? `Block ${po.block} of ${po.blocks}` : `${tm.target} min block`;
+  return `<section class="card focus run">
+    <div class="row between"><div class="row g8"><i class="sd" style="background:${col}"></i><b>${esc(st.subject)}</b></div><span class="pill">${tag}</span></div>
+    ${ringSvg(col)}
+    ${po ? `<div class="xs mut c">${fm(po.done)} of ${fm(po.total)} done · long break every ${po.every} blocks</div>` : ''}
+    <div class="tmsg" id="tmsg"></div>
+    <div class="row g8 center mt8"><button class="btn-s" data-act="distract">Lost focus · <span id="dcount">${tm.distractions}</span></button><button class="btn-s" data-act="enterFullscreenFocus">${ic('expand', 15)} Fullscreen</button></div>
+    <div class="row g8 mt12"><button class="btn-g btn-lg grow" data-act="stopTimer">${po ? 'End plan & log' : 'Finish & log'}</button><button class="btn-d btn-lg" data-act="discard">Discard</button></div></section>`;
+}
+function focusBreak(st) {
+  const po = st.po;
+  return `<section class="card focus run brk">
+    <div class="row between"><b>${po.is_long ? 'Long break' : 'Short break'}</b><span class="pill">Block ${po.block} of ${po.blocks} done</span></div>
+    ${ringSvg('#3dd6a0')}
+    <div class="xs mut c">${fm(po.done)} of ${fm(po.total)} done · next block ${po.next_len} min of ${esc(po.subject)}</div>
+    <div class="tmsg" id="tmsg"></div>
+    <div class="row g8 center mt8"><button class="btn-s" data-act="enterFullscreenFocus">${ic('expand', 15)} Fullscreen</button></div>
+    <div class="row g8 mt12"><button class="btn-p btn-lg grow" data-act="skipBreak">Skip break</button><button class="btn-d btn-lg" data-act="endPlan">End plan</button></div></section>`;
+}
 function vToday() {
-  const T = S.today, L = T.level, sv = T.streak, u = T.user;
-  const floor = T.daily_min, stretch = Math.max(T.stretch_min, floor * 2), m = T.today.total;
-  const ex = T.exams[0];
-  
-  // Rival banner
-  let rivalBanner = '';
+  const T = S.today, L = T.level, sv = T.streak, u = T.user, floor = T.daily_min, m = T.today.total;
+  let h = `<section class="card hero">
+    <div class="row between"><div class="row g12">${avatar(u.emoji, u.color, 'lg')}<div><div class="h2">${esc(u.display)}</div><div class="xs mut">Level ${L.level} · ${esc(L.emoji)} ${esc(L.rank)}</div></div></div>
+      <div class="streak ${sv.at_risk ? 'risk' : ''}"><span class="sn">${ic('flame', 20)}${sv.now}</span><span class="xs mut">${sv.at_risk ? 'at risk' : 'day streak'}</span></div></div>
+    <div class="bar xp mt12"><i style="width:${L.pct}%"></i></div>
+    <div class="row between xs mut mt4"><span>${(L.xp - L.lo).toLocaleString()} / ${(L.hi - L.lo).toLocaleString()} XP to level ${L.level + 1}</span><span>+${T.xp_today} today</span></div>
+    <div class="row between xs mut mt4"><span>${L.next_rank ? `Next title · Lv ${L.next_at}: ${esc(L.next_emoji)} ${esc(L.next_rank)}` : 'Top title reached'}</span><span class="row g4">${ic('shield', 13)} ${sv.freezes} freeze${sv.freezes === 1 ? '' : 's'}</span></div>
+    ${u.identity ? `<div class="quote">I am ${esc(u.identity)}</div>` : ''}
+    ${T.exams.length ? `<div class="chips mt8">${T.exams.map(e => `<span class="pill">${esc(e.name)} · ${e.days_left}d</span>`).join('')}</div>` : ''}</section>`;
+  T.banners.forEach(b => h += `<div class="note ${esc(b.kind)}">${esc(b.text)}</div>`);
+
+  /* competition pulse: rival gap, daily boss, who is live */
+  let p = '';
   if (T.rival) {
     const ahead = !T.rival.dir;
-    rivalBanner = `<div class="banner rival ${ahead ? 'ahead' : 'behind'}">
-      ${ahead ? '🎯' : '🛡️'} <b>${esc(T.rival.name)}</b> ${T.rival.emoji} is <b>${T.rival.gap} XP</b> ${ahead ? 'ahead' : 'behind'} you this week.
-      ${ahead ? 'One deep block closes the gap.' : "Don't coast — they're coming for you."}
-    </div>`;
+    p += `<div class="prow"><span class="pl">${ahead ? 'Chasing' : 'Defending'}</span><span><b>${esc(T.rival.name)}</b> ${esc(T.rival.emoji)} is <b>${T.rival.gap} XP</b> ${ahead ? 'ahead of you' : 'behind you'} this week.${ahead ? ' One deep block closes the gap.' : ''}</span></div>`;
   }
-  
-  // Boss battle banner
-  let bossBanner = '';
   if (T.boss) {
-    const pct = Math.min(T.boss.actual / Math.max(T.boss.target, 1) * 100, 100);
-    if (T.boss.passed === true) {
-      bossBanner = `<div class="banner boss win">👹 <b>BOSS DEFEATED!</b> Crew hit ${fm(T.boss.actual)} / ${fm(T.boss.target)} — everyone got +50 XP!</div>`;
-    } else if (T.boss.passed === false) {
-      bossBanner = `<div class="banner boss fail">💀 <b>Boss Battle Failed.</b> Crew hit ${fm(T.boss.actual)} / ${fm(T.boss.target)}. Tomorrow is another chance.</div>`;
-    } else {
-      bossBanner = `<div class="banner boss active"><b>👹 DAILY BOSS BATTLE</b> · Crew target: ${fm(T.boss.target)} · Current: ${fm(T.boss.actual)} (${pct}%)
-        <div class="bar" style="margin:8px 0 0"><i style="width:${pct}%"></i></div>
-        <span class="xs mut">Verified timer minutes only. Everyone in crew must contribute.</span>
-      </div>`;
-    }
+    const b = T.boss, pct = Math.round(clamp(b.actual / Math.max(b.target, 1) * 100, 0, 100));
+    const stt = b.passed === true ? ['Defeated', 'g'] : b.passed === false ? ['Failed', 'd'] : ['Active', ''];
+    p += `<div class="prow col"><div class="row between"><span class="pl">Daily boss</span><span class="pill ${stt[1]}">${stt[0]}</span></div>
+      <div class="bar mt4 ${b.passed === true ? 'g' : ''}"><i style="width:${pct}%"></i></div>
+      <div class="row between xs mut mt4"><span>${fm(b.actual)} of ${fm(b.target)} crew focus today</span><span>${pct}%</span></div></div>`;
   }
-  
-  let h = `<div class="card glow"><div class="row between"><div><div class="xs mut">${esc(u.emoji)} ${esc(u.display)} · LEVEL ${L.level}</div><h2 style="font-size:22px">${L.emoji} ${esc(L.rank)}</h2></div>
-    <div class="c"><div style="font-size:30px">${sv.at_risk ? '⏳' : '🔥'}</div><div class="b">${sv.now}</div><div class="xs mut">day streak</div></div></div>
-    <div class="bar" style="margin:10px 0 4px"><i style="width:${L.pct}%"></i></div>
-    <div class="row between xs mut"><span>${L.xp - L.lo} / ${L.hi - L.lo} XP to next level</span><span>❄️ ${sv.freezes} freeze${sv.freezes === 1 ? '' : 's'} · +${T.xp_today} XP today</span></div>${L.next_rank ? `<div class="xs mut" style="margin-top:4px">Next title · Lv ${L.next_at}: ${L.next_emoji} ${esc(L.next_rank)}</div>` : ''}
-    ${u.identity ? `<div class="quote">I am ${esc(u.identity)}</div>` : ''}
-    ${ex ? `<div class="row wrap" style="gap:6px;margin-top:4px">${T.exams.map(e => `<span class="pill">${esc(e.name)} · ${e.days_left}d</span>`).join('')}</div>` : ''}</div>`;
-  
-  T.banners.forEach(b => h += `<div class="banner ${b.kind}">${esc(b.text)}</div>`);
-  
-  // Add rival and boss banners
-  if (rivalBanner) h += rivalBanner;
-  if (bossBanner) h += bossBanner;
-  
-  if (T.live.length) h += `<div class="live-strip"><span class="dot live"></span> <b>${T.live.map(l => `${esc(l.display)} (${l.mode === 'stopwatch' ? '⏱ ' : ''}${esc(l.subject)} · ${fm(l.elapsed / 60)})`).join(', ')}</b> ${T.live.length > 1 ? 'are' : 'is'} locked in right now.${T.timer ? '' : ' Join them — start a block.'}</div>`;
-  /* focus card */
-  if (T.timer) {
-    const tm = T.timer;
-    h += `<div class="card glow c"><h3>${esc(tm.subject)} · ${tm.mode === 'stopwatch' ? '⏱ stopwatch' : tm.target + ' min block'}</h3>
-      <div class="ring"><svg width="210" height="210" viewBox="0 0 210 210"><circle cx="105" cy="105" r="94" stroke="#222234" stroke-width="12" fill="none"/><circle id="ringc" cx="105" cy="105" r="94" stroke="${SCOL[tm.subject]}" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="590.6" stroke-dashoffset="590.6"/></svg>
-      <div class="in"><div class="clock" id="clock" style="font-size:52px">--:--</div><div class="xs mut" id="tsub"></div></div></div>
-      <div class="row wrap" style="justify-content:center;margin-top:6px"><button data-act="distract">😵 Lost focus (<span id="dcount">${tm.distractions}</span>)</button></div>
-      <p class="xs mut" id="tmsg">${tm.mode === 'stopwatch' ? 'Open-ended. Go as long as you can, every minute is XP. (4h max per session)' : 'Phone away. One tab. Pen in hand.'}</p>
-      <div class="row"><button class="btn-g grow" data-act="stopTimer">✅ Finish & log</button><button class="btn-d" data-act="discard">Discard</button></div>
-      <button class="btn-p" style="margin-top:8px;width:100%" data-act="enterFullscreenFocus">🔍 Fullscreen focus mode</button></div>`;
-  } else {
-    h += `<div class="card"><h3>Start a focus block</h3><div class="row wrap" style="margin:10px 0">${SUBS.map(s => `<span class="chip ${S.pickSub === s ? 'on' : ''}" data-act="pickSub" data-v="${s}">${s}</span>`).join('')}</div>
-      <div class="row wrap" style="margin-bottom:10px">${[['timer', '⏳ Timer'], ['stopwatch', '⏱ Stopwatch']].map(([k, n]) => `<span class="chip ${S.pickMode === k ? 'on' : ''}" data-act="pickMode" data-v="${k}">${n}</span>`).join('')}</div>
-      ${S.pickMode === 'timer' ? `<div class="row wrap" style="margin-bottom:12px">${[25, 50, 90].map(d => `<span class="chip ${S.pickDur === d ? 'on' : ''}" data-act="pickDur" data-v="${d}">${d} min</span>`).join('')}</div>` : `<div class="xs mut" style="margin-bottom:12px">No countdown. Run it as long as you can, finish when you're done. 2 XP per minute, bonuses at 25 / 50 / 120 min. Counts as verified.</div>`}
-      <button class="btn-p btn-xl" data-act="startTimer">▶ START ${S.pickSub.toUpperCase()}${S.pickMode === 'stopwatch' ? ' · STOPWATCH' : ''}</button>
-      <button class="btn-xl" style="margin-top:8px;padding:12px;font-size:15px" data-act="start5">😮‍💨 Can't start? Just 5 minutes. That's the deal.</button>
-      <button class="btn-xl" style="margin-top:8px" data-act="openPomoModal">🍅 Pomodoro plan (auto work/break cycles)</button>
-      <details><summary>Studied offline? Log it (counts half XP)</summary>
-        <div class="row"><select id="mf_s">${SUBS.map(s => `<option ${s === S.pickSub ? 'selected' : ''}>${s}</option>`).join('')}</select><input id="mf_m" type="number" inputmode="numeric" placeholder="min" style="width:90px"><button data-act="manual">Log</button></div></details></div>`;
-  }
-  /* progress toward floor / old-self stretch */
-  h += `<div class="card"><div class="row between"><h3>Today</h3><b>${fm(m)}</b></div>
-    <div class="bar ${m >= floor ? 'g' : ''}" style="margin:10px 0 6px"><i style="width:${Math.min(m / stretch * 100, 100)}%"></i><span class="tick" style="left:${floor / stretch * 100}%"></span></div>
-    <div class="row between xs mut"><span>${sv.qualified ? '✅ Floor hit — streak safe' : `Floor: ${floor} min (${Math.max(floor - m, 0)} to go)`}</span><span>Old-you bar: ${fm(T.stretch_min)}</span></div>
-    ${Object.keys(T.today.sub).length ? `<div class="row wrap" style="margin-top:8px;gap:6px">${Object.entries(T.today.sub).map(([s, mm]) => `<span class="pill" style="background:${SCOL[s]}33;color:${SCOL[s]}">${s} ${fm(mm)}</span>`).join('')}</div>` : ''}
-    <div class="xs mut" style="margin-top:6px">Streak days need ${floor} min with half of it on the timer.</div></div>`;
-  if (T.chest.available) h += `<div class="card glow c"><div style="font-size:44px">🎁</div><div class="b">Daily chest unlocked</div><div class="xs mut">Mystery reward. Rare ones are rarer.</div><button class="btn-p" style="margin-top:8px" data-act="chest">Open it</button></div>`;
-  else if (T.chest.opened) h += `<div class="card c xs mut">🎁 Today's chest: <b style="color:var(--tx)">${esc(T.chest.reward)}</b></div>`;
+  if (T.live.length) p += `<div class="prow"><span class="dot live"></span><span><b>${T.live.map(l => `${esc(l.display)} (${esc(l.subject)} · ${fm(l.elapsed / 60)})`).join(', ')}</b> ${T.live.length > 1 ? 'are' : 'is'} locked in right now.${timerState() ? '' : ' Join them.'}</span></div>`;
+  if (p) h += `<section class="card pulse">${p}</section>`;
+
+  const st = timerState();
+  h += st ? (st.kind === 'break' ? focusBreak(st) : focusRun(st)) : focusIdle();
+
+  /* today's progress */
+  const stretch = Math.max(T.stretch_min, floor * 2);
+  h += `<section class="card">${lbl('Today', `<b class="num">${fm(m)}</b>`)}
+    <div class="bar ${m >= floor ? 'g' : ''}"><i style="width:${Math.min(m / stretch * 100, 100)}%"></i><span class="tick" style="left:${floor / stretch * 100}%"></span></div>
+    <div class="row between xs mut mt4"><span>${sv.qualified ? 'Floor hit. Streak is safe.' : `Floor ${floor} min · ${Math.max(floor - m, 0)} to go`}</span><span>Old-you bar ${fm(T.stretch_min)}</span></div>
+    ${Object.keys(T.today.sub).length ? `<div class="chips mt8">${Object.entries(T.today.sub).map(([s, mm]) => `<span class="pill" style="background:${SCOL[s]}22;color:${SCOL[s]}">${esc(s)} ${fm(mm)}</span>`).join('')}</div>` : ''}
+    <div class="xs mut mt8">A streak day needs ${floor} min, at least half of it on the timer.</div>
+    ${T.chest.available ? `<button class="btn-p btn-xl mt12" data-act="chest">Open today's chest</button>` : T.chest.opened ? `<div class="xs mut mt8">Today's chest: <b class="tx">${esc(T.chest.reward)}</b></div>` : ''}
+    ${T.sessions.length ? `<div class="lbl2">Blocks today</div>${T.sessions.map(s => `<div class="q"><i class="sd" style="background:${SCOL[s.subject]}"></i><div class="grow">${esc(s.subject)}</div><b class="num">${fm(s.minutes)}</b><span class="xs mut w64">${s.kind === 'timer' ? 'Verified' : 'Manual'}</span>${s.kind === 'manual' ? `<button class="btn-s ico" data-act="delFocus" data-id="${s.id}" aria-label="Remove">${ic('x', 14)}</button>` : ''}</div>`).join('')}` : ''}</section>`;
+
   /* quests */
-  h += `<div class="card"><h3>Daily quests</h3>${T.quests.map(q => `<div class="q"><div class="chk ${q.done ? 'on' : ''}">${q.done ? '✓' : ''}</div><div class="grow">${esc(q.text)}<div class="bar" style="height:5px;margin-top:5px"><i style="width:${Math.min(q.prog / Math.max(q.goal, 1) * 100, 100)}%"></i></div></div><span class="pill">+${q.xp}</span></div>`).join('')}</div>`;
-  /* plan */
-  h += `<div class="card"><h3>Today's promises</h3>${T.plan.length ? T.plan.map(p => `<div class="q"><div class="chk ${p.done ? 'on' : ''}" data-act="togglePlan" data-id="${p.id}">${p.done ? '✓' : ''}</div><div class="grow ${p.done ? 'mut' : ''}">${esc(p.text)}${p.cue ? `<div class="xs mut">↳ ${esc(p.cue)}</div>` : ''}</div><button class="btn-s" data-act="delPlan" data-id="${p.id}">✕</button></div>`).join('') : '<div class="mut sm" style="padding:6px 0">Nothing planned. A plan made at night beats willpower in the morning.</div>'}
-    <details><summary>+ Add a promise (with an if-then cue)</summary><input id="pl_t" placeholder="e.g. Integration Ex 7.2 Q1-10"><div style="height:6px"></div><input id="pl_c" placeholder="When/where? e.g. 6 PM at my desk, phone in other room"><div class="row" style="margin-top:8px"><button class="grow" data-act="addPlan" data-v="today">Add for today</button><button class="grow" data-act="addPlan" data-v="tomorrow">Add for tomorrow</button></div></details>
-    ${T.plan_tomorrow.length ? `<div class="xs mut" style="margin-top:6px">Tomorrow: ${T.plan_tomorrow.map(p => esc(p.text)).join(' · ')}</div>` : ''}</div>`;
-  if (T.due.length) h += `<div class="card"><div class="row between"><h3>🔁 Revise now (${T.due.length})</h3><button class="btn-s" data-act="tab" data-v="study" data-sub="revise">Open</button></div>${T.due.slice(0, 3).map(d => `<div class="q"><div class="grow"><b>${esc(d.name)}</b> <span class="xs mut">${d.subject}</span></div></div>`).join('')}</div>`;
-  h += `<div class="card"><h3>Body & discipline</h3><div class="row wrap" style="margin-top:10px">${T.habit_defs.map(x => `<span class="chip ${T.habits.includes(x.id) ? 'on' : ''}" data-act="habit" data-id="${x.id}">${x.emoji} ${esc(x.name)} <span class="xs" style="opacity:.7">+${x.xp}</span></span>`).join('')}</div></div>`;
-  if (T.sessions.length) h += `<div class="card"><h3>Today's blocks</h3>${T.sessions.map(s => `<div class="q"><span class="dot" style="background:${SCOL[s.subject]}"></span><div class="grow">${esc(s.subject)}</div><b>${fm(s.minutes)}</b><span class="xs mut">${s.kind === 'timer' ? '⏱ verified' : '✍️ manual'}</span>${s.kind === 'manual' ? `<button class="btn-s" data-act="delFocus" data-id="${s.id}">✕</button>` : ''}</div>`).join('')}</div>`;
+  h += `<section class="card">${lbl('Daily quests', `${T.quests.filter(q => q.done).length}/${T.quests.length}`)}${T.quests.map(q => `<div class="q"><div class="chk ${q.done ? 'on' : ''}">${q.done ? ic('check', 14) : ''}</div><div class="grow">${esc(q.text)}<div class="bar thin mt4"><i style="width:${Math.min(q.prog / Math.max(q.goal, 1) * 100, 100)}%"></i></div></div><span class="pill">+${q.xp}</span></div>`).join('')}</section>`;
+
+  /* promises */
+  h += `<section class="card">${lbl("Today's promises")}${T.plan.length ? T.plan.map(pl => `<div class="q"><button class="chk ${pl.done ? 'on' : ''}" data-act="togglePlan" data-id="${pl.id}" aria-label="Toggle">${pl.done ? ic('check', 14) : ''}</button><div class="grow ${pl.done ? 'mut' : ''}">${esc(pl.text)}${pl.cue ? `<div class="xs mut">${esc(pl.cue)}</div>` : ''}</div><button class="btn-s ico" data-act="delPlan" data-id="${pl.id}" aria-label="Delete">${ic('x', 14)}</button></div>`).join('') : '<div class="mut sm">Nothing planned. A plan made at night beats willpower in the morning.</div>'}
+    <details data-k="plan"><summary>Add a promise</summary><input id="pl_t" placeholder="e.g. Integration Ex 7.2 Q1-10" maxlength="120"><div style="height:6px"></div><input id="pl_c" placeholder="When and where? e.g. 6 PM, desk, phone in another room" maxlength="120"><div class="row g8 mt8"><button class="grow" data-act="addPlan" data-v="today">Add for today</button><button class="grow" data-act="addPlan" data-v="tomorrow">Add for tomorrow</button></div></details>
+    ${T.plan_tomorrow.length ? `<div class="xs mut mt8">Tomorrow: ${T.plan_tomorrow.map(x => esc(x.text)).join(' · ')}</div>` : ''}</section>`;
+  if (T.due.length) h += `<section class="card">${lbl(`Revise now (${T.due.length})`, '<button class="btn-s" data-act="tab" data-v="study" data-sub="revise">Open</button>')}${T.due.slice(0, 3).map(d => `<div class="q"><div class="grow"><b>${esc(d.name)}</b> <span class="xs mut">${esc(d.subject)}</span></div></div>`).join('')}</section>`;
+  h += `<section class="card">${lbl('Body and discipline')}<div class="chips">${T.habit_defs.map(x => `<button class="chip ${T.habits.includes(x.id) ? 'on' : ''}" data-act="habit" data-id="${x.id}">${esc(x.emoji)} ${esc(x.name)} <span class="xs op">+${x.xp}</span></button>`).join('')}</div></section>`;
   return h;
-}
-function tick() {
-  const tm = S.today?.timer; if (!tm || S.tab !== 'today') return;
-  const el = (Date.now() - S.t0) / 1000, tot = tm.target * 60, rem = tot - el;
-  const c = $('#clock'); if (!c) return;
-  if (tm.mode === 'stopwatch') {
-    const hh = Math.floor(el / 3600), mi = Math.floor(el % 3600 / 60), se = Math.floor(el % 60), mins = Math.floor(el / 60);
-    c.textContent = (hh ? hh + ':' : '') + String(mi).padStart(2, '0') + ':' + String(se).padStart(2, '0');
-    $('#ringc').style.strokeDashoffset = 590.6 * (1 - (el % 3600) / 3600);
-    $('#tsub').textContent = `${mins} min · ~${mins} XP banked${mins >= 240 ? ' · 4h CAP, log it now' : ''}`;
-    const marks = [[25, 'Clean-run zone: zero distractions = +10 XP.'], [50, 'Deep block unlocked (+20 XP). Keep going.'], [120, 'MARATHON. +40 XP bonus locked in.'], [180, 'Ragda Beast territory. Drink water.']];
-    const hit = marks.filter(m => mins >= m[0]).pop();
-    if (hit && S.sw !== hit[0]) { S.sw = hit[0]; beep(); const t = $('#tmsg'); if (t) t.innerHTML = `<b>${hit[1]}</b>`; }
-    clearTimeout(S._tt); S._tt = setTimeout(tick, 500); return;
-  }
-  const a = Math.abs(rem), mm = Math.floor(a / 60), ss = Math.floor(a % 60);
-  c.textContent = (rem < 0 ? '+' : '') + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
-  $('#ringc').style.strokeDashoffset = 590.6 * (1 - Math.min(el / tot, 1));
-  $('#tsub').textContent = rem < 0 ? 'overtime — bonus focus' : `${Math.floor(el / 60)} min in`;
-  if (rem <= 0 && !S.beeped) {
-    S.beeped = true; beep();
-    $('#tmsg').innerHTML = tm.target <= 5 ? '<b>5 minutes done. The hard part is over.</b> <button class="btn-p btn-s" data-act="extend">Keep going +20</button>' : '<b>Block complete.</b> Log it, then take a real break.';
-  }
-  clearTimeout(S._tt); S._tt = setTimeout(tick, 500);
 }
 
 /* ---------- CREW ---------- */
@@ -225,93 +504,84 @@ const pv = m => ({ xp: m[PK[S.crewPeriod][0]], min: m[PK[S.crewPeriod][1]] });
 const crewSorted = C => C.members.slice().sort((a, b) => pv(b).xp - pv(a).xp);
 function vCrew() {
   const C = S.crew;
-  if (!C.crew) return `<div class="card"><h2>No crew yet</h2><p class="mut">Competition works. Join your friends.</p><input id="cj" placeholder="Invite code"><div style="height:8px"></div><button class="btn-p btn-xl" data-act="joinCrew">Join crew</button><div class="mut c sm" style="margin:10px 0">— or —</div><input id="cn" placeholder="New crew name"><div style="height:8px"></div><button class="btn-xl" data-act="createCrew">Create crew</button></div>`;
-  const me = C.members.find(m => m.me);
-  const tp = Math.min(C.team.minutes / Math.max(C.team.goal, 1) * 100, 100);
-  
-  // Crown holder display
-  let crownHtml = '';
-  if (C.crown) {
-    crownHtml = `<div class="crown-holder"><span class="crown-emoji">👑</span> <b>${esc(C.crown.name)}</b> ${C.crown.emoji} holds the crown this week with <b>${C.crown.xp} XP</b></div>`;
-  }
-  
-  let h = `<div class="card glow"><div class="row between"><div><h2>${esc(C.crew.name)}</h2><div class="xs mut">Invite code: <b style="color:var(--acc2);letter-spacing:.15em" data-act="copy" data-v="${esc(C.crew.code)}">${esc(C.crew.code)}</b> (tap to copy)</div></div><div class="c"><div class="xs mut">YOUR RANK</div><div class="big" style="font-size:30px">#${me.rank}</div></div></div>
-    ${C.rival ? `<div class="sm" style="margin-top:8px">${C.rival.dir === 'ahead' ? `🎯 <b>${esc(C.rival.name)}</b> is <b>${C.rival.gap} XP</b> ahead of you this week. One deep block closes it.` : `🛡️ <b>${esc(C.rival.name)}</b> is only <b>${C.rival.gap} XP</b> behind. Don't coast.`}</div>` : ''}
-    ${crownHtml}</div>`;
-  h += `<div class="card"><div class="row between"><h3>Crew weekly goal</h3><b>${fm(C.team.minutes)} / ${fm(C.team.goal)}</b></div><div class="bar o" style="margin:10px 0 4px"><i style="width:${tp}%"></i></div><div class="xs mut">Hit it together = +100 XP each (you must log 5h+ yourself to share the loot). Nobody free-rides.</div></div>`;
-  
-  // Boss battle section
+  if (!C.crew) return `<section class="card"><h2>No crew yet</h2><p class="mut sm">Competition works. Join your friends.</p><input id="cj" placeholder="Invite code" autocapitalize="characters"><button class="btn-p btn-xl mt8" data-act="joinCrew">Join crew</button><div class="mut xs c" style="margin:12px 0">or</div><input id="cn" placeholder="New crew name"><button class="btn-xl mt8" data-act="createCrew">Create crew</button></section>`;
+  const sorted = crewSorted(C), meI = Math.max(sorted.findIndex(m => m.me), 0), me = sorted[meI], top = Math.max(...sorted.map(m => pv(m).xp), 1);
+  const gap = meI > 0 ? `${pv(sorted[meI - 1]).xp - pv(me).xp} XP behind <b>${esc(sorted[meI - 1].display)}</b>. One deep block closes it.`
+    : sorted.length > 1 ? `Leading by ${pv(me).xp - pv(sorted[1]).xp} XP over <b>${esc(sorted[1].display)}</b>. Don't coast.` : 'Invite friends to start competing.';
+  const per = { week: 'This week', month: 'This month', all: 'All time' }[S.crewPeriod];
+  let h = `<section class="card hero"><div class="row between"><div><h2>${esc(C.crew.name)}</h2><div class="xs mut mt4">Invite code <button class="code" data-act="copy" data-v="${esc(C.crew.code)}">${esc(C.crew.code)}</button></div></div>
+    <div class="c"><div class="xs mut">${per} rank</div><div class="bignum sm">#${meI + 1}<span class="mut of"> / ${sorted.length}</span></div></div></div>
+    <div class="sm mt12">${gap}</div>
+    ${C.crown ? `<div class="crownline">${ic('crown', 15)}<span><b>${esc(C.crown.name)}</b> ${esc(C.crown.emoji)} held the crown last week with ${C.crown.xp.toLocaleString()} XP</span></div>` : ''}</section>`;
+
+  h += `<section class="card">${seg([['week', 'Week'], ['month', 'Month'], ['all', 'All time']], S.crewPeriod, 'crewPeriod')}
+    <div class="lbl2">${{ week: "This week's league", month: 'This month', all: 'All-time legends' }[S.crewPeriod]}</div>
+    ${sorted.map((m, i) => {
+    const p = pv(m), dot = m.live ? '<span class="dot live"></span>' : m.qualified ? '<span class="dot g"></span>' : m.today_min > 0 ? '<span class="dot y"></span>' : '<span class="dot"></span>';
+    return `<div class="lb ${m.me ? 'me' : ''}"><div class="rk ${i < 3 ? 'top' + (i + 1) : ''}">${i === 0 ? ic('crown', 16) : i + 1}</div>${avatar(m.emoji, m.color)}
+      <div class="grow lbm"><div class="lbn"><b class="ell">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dot}</div>
+        <div class="xs mut ell">Lv ${m.level.level} ${esc(m.level.emoji)} ${esc(m.level.rank)} · ${ic('flame', 11)}${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span class="live-t">live: ${esc(m.live.subject)}</span>` : ''}</div>
+        <div class="bar thin mt4"><i style="width:${Math.round(p.xp / top * 100)}%;background:${esc(m.color)}"></i></div></div>
+      <div class="lbx"><b class="num">${p.xp.toLocaleString()}</b><div class="xs mut">XP · ${fm(p.min)}</div>${!m.me && !m.qualified ? `<button class="btn-s nudge" ${m.nudged ? 'disabled' : ''} data-act="nudge" data-id="${m.id}">${m.nudged ? 'Nudged' : 'Nudge'}</button>` : ''}</div></div>`;
+  }).join('')}
+    <div class="xs mut mt8"><span class="dot live"></span> live · <span class="dot g"></span> floor hit · <span class="dot y"></span> some work · <span class="dot"></span> nothing yet. A nudge gives you +5 XP. The league resets every Monday.</div></section>`;
+
+  const tp = Math.round(Math.min(C.team.minutes / Math.max(C.team.goal, 1) * 100, 100));
+  h += `<section class="card">${lbl('Crew weekly goal', `<b class="num">${fm(C.team.minutes)} / ${fm(C.team.goal)}</b>`)}<div class="bar o"><i style="width:${tp}%"></i></div><div class="xs mut mt8">Hit it together for +100 XP each. You must log 5h+ yourself to share the loot. Nobody free-rides.</div></section>`;
   if (C.boss) {
-    const pct = Math.min(C.boss.actual / Math.max(C.boss.target, 1) * 100, 100);
-    let bossHtml = '';
-    if (C.boss.passed === true) {
-      bossHtml = `<div class="card glow"><h3>👹 DAILY BOSS BATTLE — <span style="color:var(--good)">DEFEATED</span></h3><div class="c" style="font-size:28px;margin:8px 0">✅ ${fm(C.boss.actual)} / ${fm(C.boss.target)}</div><div class="xs mut">Everyone got +50 XP. Streak freezes dropped.</div></div>`;
-    } else if (C.boss.passed === false) {
-      bossHtml = `<div class="card"><h3>👹 DAILY BOSS BATTLE — <span style="color:var(--bad)">FAILED</span></h3><div class="c" style="font-size:28px;margin:8px 0">❌ ${fm(C.boss.actual)} / ${fm(C.boss.target)}</div><div class="xs mut">Crew missed the target. 3 fails this week = weekly goal XP disabled.</div></div>`;
-    } else {
-      bossHtml = `<div class="card"><h3>👹 DAILY BOSS BATTLE — <span style="color:var(--acc2)">ACTIVE</span></h3><div class="c" style="font-size:28px;margin:8px 0">${fm(C.boss.actual)} / ${fm(C.boss.target)} <span class="pill">${pct}%</span></div><div class="bar" style="margin:8px 0"><i style="width:${pct}%"></i></div><div class="xs mut">Target resets at 3 AM IST. Verified timer minutes count. Everyone must contribute.</div></div>`;
-    }
-    h += bossHtml;
+    const b = C.boss, pct = Math.round(clamp(b.actual / Math.max(b.target, 1) * 100, 0, 100)), stt = b.passed === true ? ['Defeated', 'g'] : b.passed === false ? ['Failed', 'd'] : ['Active', ''];
+    h += `<section class="card">${lbl('Daily boss battle', `<span class="pill ${stt[1]}">${stt[0]}</span>`)}<div class="bignum sm c">${fm(b.actual)} <span class="mut of">/ ${fm(b.target)}</span></div><div class="bar mt8 ${b.passed === true ? 'g' : ''}"><i style="width:${pct}%"></i></div>
+      <div class="xs mut mt8">${b.passed === true ? 'Everyone got +50 XP.' : b.passed === false ? 'The crew missed the target. Three fails in a week disables the weekly goal XP.' : 'Verified timer minutes only. The target resets at 3 AM.'}</div></section>`;
   }
-  
-  h += `<div class="card"><div class="sub-tabs" style="margin:0 0 8px">${[['week', 'Week'], ['month', 'Month'], ['all', 'All-time']].map(([k, n]) => `<span class="chip ${S.crewPeriod === k ? 'on' : ''}" data-act="crewPeriod" data-v="${k}">${n}</span>`).join('')}</div><h3>${{ week: "This week's league", month: 'This month', all: 'All-time legends' }[S.crewPeriod]}</h3><table class="tbl">${crewSorted(C).map((m, i) => {
-    const st = m.live ? '<span class="dot live"></span>' : m.qualified ? '<span class="dot g"></span>' : m.today_min > 0 ? '<span class="dot y"></span>' : '<span class="dot"></span>';
-    return `<tr><td style="width:22px" class="mut">${i === 0 ? '👑' : i + 1}</td><td style="width:42px"><div class="av" style="background:${m.color}33;border:2px solid ${m.color}">${esc(m.emoji)}</div></td>
-      <td><b>${esc(m.display)}${m.me ? ' (you)' : ''}</b>${m.crowns ? ` <span title="weekly wins">👑×${m.crowns}</span>` : ''} ${st}<div class="xs mut">Lv ${m.level.level} ${m.level.emoji} ${esc(m.level.rank)} · 🔥${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span style="color:var(--good)">live: ${m.live.mode === 'stopwatch' ? '⏱ ' : ''}${esc(m.live.subject)}</span>` : ''}</div></td>
-      <td class="c"><b>${pv(m).xp}</b><div class="xs mut">XP · ${fm(pv(m).min)}</div></td>
-      <td style="width:50px">${!m.me && !m.qualified ? `<button class="btn-s" ${m.nudged ? 'disabled style="opacity:.4"' : ''} data-act="nudge" data-id="${m.id}">👊</button>` : ''}</td></tr>`;
-  }).join('')}</table><div class="xs mut">● live now · ● floor hit · ● some work · ○ nothing yet. 👊 = nudge (+5 XP for you). League resets every Monday: fresh start for everyone.</div></div>`;
-  if (C.records && C.records.length) h += `<div class="card"><h3>🏛️ Crew records</h3>${C.records.map(r => `<div class="q"><div class="grow sm">${esc(r.label)}</div><div class="c"><b>${r.unit === 'min' ? fm(r.value) : r.value + ' ' + r.unit}</b><div class="xs mut">${esc(r.emoji)} ${esc(r.name)}${r.me ? ' (you, defend it)' : ''}</div></div></div>`).join('')}<div class="xs mut" style="margin-top:6px">Break one in a verified session and the whole crew sees it in the feed.</div></div>`;
-  if (C.hall && C.hall.length) h += `<div class="card"><h3>👑 Weekly champions</h3>${C.hall.map(x => `<div class="q"><span class="xs mut" style="width:58px">wk ${esc(x.week.slice(5))}</span><div class="grow">${esc(x.emoji)} <b>${esc(x.name)}</b></div><span class="pill">${x.xp} XP</span></div>`).join('')}</div>`;
+  if (C.records && C.records.length) h += `<section class="card">${lbl('Crew records')}${C.records.map(r => `<div class="q"><div class="grow sm">${esc(r.label)}</div><div class="rt2"><b class="num">${r.unit === 'min' ? fm(r.value) : r.value + ' ' + r.unit}</b><div class="xs mut">${esc(r.emoji)} ${esc(r.name)}${r.me ? ' (you, defend it)' : ''}</div></div></div>`).join('')}<div class="xs mut mt8">Break one in a verified session and the whole crew sees it.</div></section>`;
+  if (C.hall && C.hall.length) h += `<section class="card">${lbl('Weekly champions')}${C.hall.map(x => `<div class="q"><span class="xs mut w64">wk ${esc(x.week.slice(5))}</span><div class="grow">${esc(x.emoji)} <b>${esc(x.name)}</b></div><span class="pill">${x.xp.toLocaleString()} XP</span></div>`).join('')}</section>`;
   const others = C.members.filter(m => !m.me);
-  h += `<div class="card"><div class="row between"><h3>⚔️ Duels</h3></div>${C.duels.length ? C.duels.map(d => `<div class="q"><div class="grow"><b>${esc(d.an)}</b> vs <b>${esc(d.bn)}</b> <span class="xs mut">${d.days}d · most focus minutes wins</span>${d.status === 'active' ? `<div class="xs">${fm(d.a_min)} — ${fm(d.b_min)} · ends ${d.end}</div>` : '<div class="xs mut">waiting for accept…</div>'}</div>${d.status === 'pending' && d.b === C.me ? `<button class="btn-p btn-s" data-act="acceptDuel" data-id="${d.id}">Accept</button>` : ''}</div>`).join('') : '<div class="mut sm">No duels. Pick a victim.</div>'}
-    ${others.length ? `<div class="row" style="margin-top:8px"><select id="du_o">${others.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('')}</select><select id="du_d" style="width:90px"><option value="3">3d</option><option value="7" selected>7d</option><option value="14">14d</option></select><button data-act="duel">Challenge</button></div>` : ''}</div>`;
-  h += `<div class="card"><h3>Crew feed</h3>${C.feed.length ? C.feed.map(f => `<div class="feed"><div class="row"><div class="av" style="width:28px;height:28px;font-size:14px;background:${f.color}33">${esc(f.emoji)}</div><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text)}</div><span class="xs mut">${ago(f.ts)}</span></div>
-    <div>${['🔥', '💪', '👏', '😤', '🫡'].map(e => `<span class="rx ${f.mine === e ? 'me' : ''}" data-act="react" data-id="${f.id}" data-e="${e}">${e}${f.reactions[e] ? ' ' + f.reactions[e] : ''}</span>`).join('')}</div></div>`).join('') : '<div class="mut sm">Quiet. Be the first to move.</div>'}</div>`;
+  h += `<section class="card">${lbl('Duels')}${C.duels.length ? C.duels.map(d => `<div class="q"><div class="grow"><b>${esc(d.an)}</b> vs <b>${esc(d.bn)}</b> <span class="xs mut">${d.days}d · most focus minutes wins</span>${d.status === 'active' ? `<div class="xs">${fm(d.a_min)} vs ${fm(d.b_min)} · ends ${esc(d.end)}</div>` : '<div class="xs mut">Waiting for accept…</div>'}</div>${d.status === 'pending' && d.b === C.me ? `<button class="btn-p btn-s" data-act="acceptDuel" data-id="${d.id}">Accept</button>` : ''}</div>`).join('') : '<div class="mut sm">No duels running. Pick a rival.</div>'}
+    ${others.length ? `<div class="row g8 mt12"><select id="du_o">${others.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('')}</select><select id="du_d" style="width:84px"><option value="3">3d</option><option value="7" selected>7d</option><option value="14">14d</option></select><button data-act="duel">Challenge</button></div>` : ''}</section>`;
+  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed"><div class="row g8">${avatar(f.emoji, f.color, 'sm')}<div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
+    <div class="rxrow">${['🔥', '💪', '👏', '😤', '🫡'].map(e => `<button class="rx ${f.mine === e ? 'me' : ''}" data-act="react" data-id="${f.id}" data-e="${e}">${e}${f.reactions[e] ? ' ' + f.reactions[e] : ''}</button>`).join('')}</div></div>`).join('') : '<div class="mut sm">Quiet. Be the first to move.</div>'}</section>`;
   return h;
 }
-function ago(ts) { const s = (Date.now() - new Date(ts).getTime()) / 1000; if (s < 90) return 'now'; if (s < 3600) return Math.floor(s / 60) + 'm'; if (s < 86400) return Math.floor(s / 3600) + 'h'; return Math.floor(s / 86400) + 'd'; }
-
 /* ---------- STUDY (syllabus / revise / tests) ---------- */
 function vStudy() {
-  const tabs = [['chapters', '📖 Chapters'], ['revise', '🔁 Revise'], ['tests', '📝 Tests']];
-  let h = `<div class="sub-tabs">${tabs.map(t => `<span class="chip ${S.sub === t[0] ? 'on' : ''}" data-act="sub" data-v="${t[0]}">${t[1]}</span>`).join('')}</div>`;
+  const tabs = [['chapters', 'Chapters'], ['revise', 'Revise'], ['tests', 'Tests']];
+  let h = seg(tabs, S.sub, 'sub');
   if (S.sub === 'chapters') {
     const chs = S.syl.chapters, ins = S.ins, ch = ins?.chapters;
-    if (ch) h += `<div class="card glow"><h3>Syllabus war map</h3><div class="grid3" style="margin-top:10px"><div class="stat"><b>${ch.left}</b><span class="xs mut">untouched</span></div><div class="stat"><b>${ch.learned}</b><span class="xs mut">learned</span></div><div class="stat"><b>${ch.mastered}</b><span class="xs mut">mastered</span></div></div>
-      ${ins.exams.map(e => `<div class="sm" style="margin-top:8px">${esc(e.name)}: <b>${e.days_left} days</b> → you need <b>${e.need_per_week}</b> new chapters/week. Current pace: <b>${ch.rate.toFixed(1)}</b>/week. ${ch.rate >= e.need_per_week ? '✅ On pace.' : '⚠️ Behind pace — go narrower on weightage, wider on PYQs.'}</div>`).join('')}</div>`;
-    h += `<div class="xs mut" style="margin:4px 2px">Tap 📖 learned → 🔁 revisions auto-schedule (day 1, 3, 7, 14, 30). ✍️ practiced · 🏆 mastered (scored well in a test).</div>`;
-    ['Physics', 'Chemistry', 'Maths', 'English', 'Other'].forEach(sub => {
+    if (ch) h += `<section class="card hero">${lbl('Syllabus map')}<div class="grid3"><div class="stat"><b>${ch.left}</b><span class="xs mut">untouched</span></div><div class="stat"><b>${ch.learned}</b><span class="xs mut">learned</span></div><div class="stat"><b>${ch.mastered}</b><span class="xs mut">mastered</span></div></div>
+      ${(ins.exams || []).map(e => `<div class="sm mt8">${esc(e.name)}: <b>${e.days_left} days</b> left. You need <b>${e.need_per_week}</b> new chapters a week; current pace is <b>${ch.rate.toFixed(1)}</b>. ${ch.rate >= e.need_per_week ? '<span class="good">On pace.</span>' : '<span class="warn">Behind pace. Go narrower on weightage, wider on PYQs.</span>'}</div>`).join('')}</section>`;
+    h += `<div class="xs mut" style="margin:4px 2px 0">Each tick moves a chapter up: learned, practiced, mastered. Marking it learned schedules revisions on day 1, 3, 7, 14 and 30. Mastered means you scored well on it in a test.</div>`;
+    SUBS.forEach(sub => {
       const list = chs.filter(c => c.subject === sub); if (!list.length) return;
       const l = list.filter(c => c.status >= 1).length, mst = list.filter(c => c.status >= 3).length;
-      h += `<div class="card"><div class="row between"><h2 style="color:${SCOL[sub]}">${sub}</h2><span class="xs mut">${l}/${list.length} learned · ${mst} mastered</span></div><div class="bar" style="margin:8px 0"><i style="width:${l / list.length * 100}%;background:${SCOL[sub]}"></i></div>`;
+      h += `<section class="card"><div class="row between"><h2 style="color:${SCOL[sub]}">${sub}</h2><span class="xs mut">${l}/${list.length} learned · ${mst} mastered</span></div><div class="bar mt8"><i style="width:${l / list.length * 100}%;background:${SCOL[sub]}"></i></div>`;
       ['11', '12', '+'].forEach(g => {
         const gl = list.filter(c => c.grade === g); if (!gl.length) return;
-        h += `<div class="xs mut" style="margin-top:8px">${g === '+' ? 'ADDED BY YOU' : 'CLASS ' + g}</div>` + gl.map(c => `<div class="ch"><div class="grow ${c.status >= 3 ? 'mut' : ''}">${esc(c.name)}</div><div class="st">${[[1, '📖'], [2, '✍️'], [3, '🏆']].map(([n, e]) => `<button class="${c.status >= n ? 'on' : ''}" data-act="chap" data-id="${c.id}" data-s="${c.status === n ? n - 1 : n}">${e}</button>`).join('')}</div></div>`).join('');
+        h += `<div class="lbl2">${g === '+' ? 'Added by you' : 'Class ' + g}</div>` + gl.map(c => `<div class="ch"><div class="grow ${c.status >= 3 ? 'mut' : ''}">${esc(c.name)}</div><div class="steps">${[[1, 'Learned'], [2, 'Practiced'], [3, 'Mastered']].map(([n, t]) => `<button class="${c.status >= n ? 'on' : ''}" title="${t}" aria-label="${t}" data-act="chap" data-id="${c.id}" data-s="${c.status === n ? n - 1 : n}">${ic('check', 14)}</button>`).join('')}</div></div>`).join('');
       });
-      h += `<details><summary>+ add a chapter/topic to ${sub}</summary><div class="row"><input id="ca_${sub}" placeholder="Name"><button data-act="addChap" data-v="${sub}">Add</button></div></details></div>`;
+      h += `<details data-k="addch-${sub}"><summary>Add a chapter or topic to ${sub}</summary><div class="row g8 mt8"><input id="ca_${sub}" placeholder="Name" maxlength="60"><button data-act="addChap" data-v="${sub}">Add</button></div></details></section>`;
     });
   }
   if (S.sub === 'revise') {
     const due = S.syl.revisions.filter(r => r.due <= S.syl.today), up = S.syl.revisions.filter(r => r.due > S.syl.today);
-    h += `<div class="card glow"><h3>Active recall queue</h3><p class="sm mut">Close the book. Write everything you remember for 3 minutes. Then rate honestly — honest "blank" ratings are what make you win.</p>
-      ${due.length ? due.map(r => `<div class="q" style="flex-wrap:wrap"><div class="grow"><b>${esc(r.name)}</b> <span class="xs mut">${r.subject} · review #${r.stage + 1}${r.due < S.syl.today ? ' · overdue' : ''}</span></div><div class="row"><button class="btn-g btn-s" data-act="rev" data-id="${r.id}" data-r="solid">✅ Solid</button><button class="btn-s" data-act="rev" data-id="${r.id}" data-r="shaky">😬 Shaky</button><button class="btn-d btn-s" data-act="rev" data-id="${r.id}" data-r="blank">❌ Blank</button></div></div>`).join('') : '<div class="c" style="padding:16px">🎉 Nothing due. Learn something new → it will be scheduled.</div>'}</div>`;
-    if (up.length) h += `<div class="card"><h3>Coming up</h3>${up.slice(0, 12).map(r => `<div class="q"><div class="grow">${esc(r.name)} <span class="xs mut">${r.subject}</span></div><span class="xs mut">${r.due}</span></div>`).join('')}</div>`;
+    h += `<section class="card hero">${lbl('Active recall queue', due.length ? `${due.length} due` : '')}<p class="sm mut">Close the book. Write everything you remember for 3 minutes. Then rate honestly. Honest "blank" ratings are what make you win.</p>
+      ${due.length ? due.map(r => `<div class="q wrapq"><div class="grow"><b>${esc(r.name)}</b> <span class="xs mut">${esc(r.subject)} · review #${r.stage + 1}${r.due < S.syl.today ? ' · overdue' : ''}</span></div><div class="row g4"><button class="btn-g btn-s" data-act="rev" data-id="${r.id}" data-r="solid">Solid</button><button class="btn-s" data-act="rev" data-id="${r.id}" data-r="shaky">Shaky</button><button class="btn-d btn-s" data-act="rev" data-id="${r.id}" data-r="blank">Blank</button></div></div>`).join('') : '<div class="c mut" style="padding:18px 0">Nothing due. Learn something new and it gets scheduled.</div>'}</section>`;
+    if (up.length) h += `<section class="card">${lbl('Coming up')}${up.slice(0, 12).map(r => `<div class="q"><div class="grow">${esc(r.name)} <span class="xs mut">${esc(r.subject)}</span></div><span class="xs mut">${esc(r.due)}</span></div>`).join('')}</section>`;
   }
   if (S.sub === 'tests') {
     const T = S.tests, ts = T.tests, pct = ts.map(t => Math.round(t.score / t.maxscore * 100));
-    h += `<div class="card"><h3>Log a test / PYQ paper</h3><div class="grid2"><div><label>Name</label><input id="t_n" placeholder="Mock 3 / PYQ 2024"></div><div><label>Subject</label><select id="t_s"><option>All</option>${SUBS.map(s => `<option>${s}</option>`).join('')}</select></div>
+    h += `<section class="card">${lbl('Log a test or PYQ paper')}<div class="grid2"><div><label>Name</label><input id="t_n" placeholder="Mock 3 / PYQ 2024" maxlength="60"></div><div><label>Subject</label><select id="t_s"><option>All</option>${SUBS.map(s => `<option>${s}</option>`).join('')}</select></div>
       <div><label>Score</label><input id="t_sc" type="number" inputmode="decimal"></div><div><label>Out of</label><input id="t_mx" type="number" inputmode="decimal" value="300"></div></div>
-      <label>Where did you lose marks? (count of questions)</label><div class="grid3"><input id="t_c" type="number" inputmode="numeric" placeholder="Concept gap"><input id="t_si" type="number" inputmode="numeric" placeholder="Silly mistake"><input id="t_t" type="number" inputmode="numeric" placeholder="Ran out of time"></div>
-      <div style="height:10px"></div><button class="btn-p btn-xl" data-act="addTest">Save (+80 XP)</button></div>`;
-    if (pct.length > 1) h += `<div class="card"><h3>Score trend</h3>${lines([{ v: pct, c: '#22d3a6', w: 2.5 }])}<div class="row between xs mut"><span>${pct[0]}%</span><span>latest ${pct[pct.length - 1]}% (${pct[pct.length - 1] - pct[0] >= 0 ? '+' : ''}${pct[pct.length - 1] - pct[0]} since first)</span></div></div>`;
+      <label>Where did you lose marks? (number of questions)</label><div class="grid3"><input id="t_c" type="number" inputmode="numeric" placeholder="Concept gap"><input id="t_si" type="number" inputmode="numeric" placeholder="Silly mistake"><input id="t_t" type="number" inputmode="numeric" placeholder="Out of time"></div>
+      <button class="btn-p btn-xl mt12" data-act="addTest">Save (+80 XP)</button></section>`;
+    if (pct.length > 1) h += `<section class="card">${lbl('Score trend')}${lines([{ v: pct, c: '#3dd6a0', w: 2.5 }])}<div class="row between xs mut"><span>${pct[0]}%</span><span>latest ${pct[pct.length - 1]}% (${pct[pct.length - 1] - pct[0] >= 0 ? '+' : ''}${pct[pct.length - 1] - pct[0]} since first)</span></div></section>`;
     const e = T.errors, tot = e.concept + e.silly + e.time;
     if (tot) {
       const top = Object.entries(e).sort((a, b) => b[1] - a[1])[0][0];
-      const advice = { concept: 'Most lost marks are CONCEPT gaps. Stop doing new questions. Re-learn the 3 weakest chapters, then do 10 PYQs per chapter.', silly: 'Most lost marks are SILLY mistakes — you know it, you botched it. Fix process: circle units/signs, re-read the question, reserve 10 min at the end to re-check.', time: 'Most lost marks are TIME. Practice in timed sections, skip-and-return, and stop sinking 6 minutes into one question.' }[top];
-      h += `<div class="card"><h3>Error autopsy (last 8 tests)</h3><div class="grid3" style="margin:10px 0"><div class="stat"><b>${e.concept}</b><span class="xs mut">concept</span></div><div class="stat"><b>${e.silly}</b><span class="xs mut">silly</span></div><div class="stat"><b>${e.time}</b><span class="xs mut">time</span></div></div><div class="sm">${advice}</div></div>`;
+      const advice = { concept: 'Most lost marks are concept gaps. Stop doing new questions. Re-learn the 3 weakest chapters, then do 10 PYQs per chapter.', silly: 'Most lost marks are silly mistakes: you know it, you botched it. Fix the process. Circle units and signs, re-read the question, keep 10 minutes at the end to re-check.', time: 'Most lost marks are time. Practice in timed sections, skip and return, and stop sinking 6 minutes into one question.' }[top];
+      h += `<section class="card">${lbl('Error autopsy', 'last 8 tests')}<div class="grid3"><div class="stat"><b>${e.concept}</b><span class="xs mut">concept</span></div><div class="stat"><b>${e.silly}</b><span class="xs mut">silly</span></div><div class="stat"><b>${e.time}</b><span class="xs mut">time</span></div></div><div class="sm mt8">${advice}</div></section>`;
     }
-    h += `<div class="card"><h3>History</h3>${ts.length ? ts.slice().reverse().map(t => `<div class="q"><div class="grow">${esc(t.name)} <span class="xs mut">${t.subject} · ${t.day}</span></div><b>${t.score}/${t.maxscore}</b><span class="pill">${Math.round(t.score / t.maxscore * 100)}%</span></div>`).join('') : '<div class="mut sm">No tests yet. Feelings lie; scores don\'t.</div>'}</div>`;
+    h += `<section class="card">${lbl('History')}${ts.length ? ts.slice().reverse().map(t => `<div class="q"><div class="grow">${esc(t.name)} <span class="xs mut">${esc(t.subject)} · ${esc(t.day)}</span></div><b class="num">${t.score}/${t.maxscore}</b><span class="pill">${Math.round(t.score / t.maxscore * 100)}%</span></div>`).join('') : '<div class="mut sm">No tests yet. Feelings lie; scores do not.</div>'}</section>`;
   }
   return h;
 }
@@ -319,155 +589,199 @@ function vStudy() {
 /* ---------- REFLECT ---------- */
 function vReflect() {
   const R = S.refl, W = S.weekly, t = R.today, miss = R.minutes < R.daily_min;
-  const moodRow = (id, v) => `<div class="mood" id="${id}">${['😞', '😕', '😐', '🙂', '😄'].map((e, i) => `<span class="${(v || 3) === i + 1 ? 'on' : ''}" data-act="mood" data-g="${id}" data-v="${i + 1}">${e}</span>`).join('')}</div>`;
-  let h = `<div class="card glow"><h2>Tonight's reflection</h2><p class="sm mut">60 seconds. Not a diary — a debugging session. ${t ? '<b style="color:var(--good)">Done for today ✓ (you can edit it).</b>' : '+40 XP'}</p>
-    <label>Mood</label>${moodRow('f_mood', t?.mood)}<label>Energy</label>${moodRow('f_energy', t?.energy)}
-    <label>One specific WIN today (small counts: "did 12 integration problems")</label><textarea id="f_win">${esc(t?.win || '')}</textarea>
+  const scale = (id, v, lo, hi) => `<div class="scale" id="${id}">${[1, 2, 3, 4, 5].map(i => `<span class="${(v || 3) === i ? 'on' : ''}" data-act="mood" data-g="${id}" data-v="${i}">${i}</span>`).join('')}</div><div class="row between xs mut mt4"><span>${lo}</span><span>${hi}</span></div>`;
+  let h = `<section class="card hero"><h2>Tonight's reflection</h2><p class="sm mut">60 seconds. Not a diary, a debugging session. ${t ? '<b class="good">Done for today. You can still edit it.</b>' : '+40 XP'}</p>
+    <label>Mood</label>${scale('f_mood', t?.mood, 'Low', 'High')}<label>Energy</label>${scale('f_energy', t?.energy, 'Drained', 'Charged')}
+    <label>One specific win today (small counts: "did 12 integration problems")</label><textarea id="f_win">${esc(t?.win || '')}</textarea>
     <label>Where did time leak, and what triggered it? (describe, don't judge)</label><textarea id="f_leak">${esc(t?.leak || '')}</textarea>
     ${miss ? `<label>You're under your floor today. What would you say to a friend in your exact spot?</label><textarea id="f_kind" placeholder="Kind, specific, forward-looking.">${esc(t?.kind_note || '')}</textarea>` : `<input type="hidden" id="f_kind" value="${esc(t?.kind_note || '')}">`}
-    <label>Tomorrow's ONE thing (becomes a promise)</label><input id="f_tom" value="${esc(t?.tomorrow || '')}" placeholder="e.g. Integration by parts, 15 problems">
-    <label>When & where exactly? (implementation intention)</label><input id="f_cue" placeholder="After breakfast, desk, phone in the other room"><div style="height:12px"></div><button class="btn-p btn-xl" data-act="saveReflect">Save reflection</button></div>`;
+    <label>Tomorrow's one thing (becomes a promise)</label><input id="f_tom" value="${esc(t?.tomorrow || '')}" placeholder="e.g. Integration by parts, 15 problems">
+    <label>When and where exactly?</label><input id="f_cue" placeholder="After breakfast, desk, phone in the other room">
+    <button class="btn-p btn-xl mt12" data-act="saveReflect">Save reflection</button></section>`;
   const s = W.summary, ex = W.existing, d = s.minutes - s.prev_minutes;
-  h += `<div class="card"><h2>Weekly review</h2><p class="sm mut">Week of ${s.week}. The data first, then the decision. +100 XP.</p><div class="grid3" style="margin:10px 0"><div class="stat"><b>${fm(s.minutes)}</b><span class="xs mut">focus</span></div><div class="stat"><b>${s.qualified_days}/7</b><span class="xs mut">floor days</span></div><div class="stat"><b>${d >= 0 ? '+' : ''}${fm(Math.abs(d)).replace(/^/, d < 0 ? '-' : '')}</b><span class="xs mut">vs last wk</span></div></div>
-    ${Object.keys(s.by_subject).length ? `<div class="row wrap" style="gap:6px">${Object.entries(s.by_subject).map(([k, v]) => `<span class="pill" style="background:${SCOL[k]}33;color:${SCOL[k]}">${k} ${fm(v)}</span>`).join('')}</div>` : ''}
+  h += `<section class="card">${lbl('Weekly review', `Week of ${esc(s.week)}`)}<p class="sm mut">The data first, then the decision. +100 XP.</p><div class="grid3"><div class="stat"><b>${fm(s.minutes)}</b><span class="xs mut">focus</span></div><div class="stat"><b>${s.qualified_days}/7</b><span class="xs mut">floor days</span></div><div class="stat"><b>${d < 0 ? '-' : '+'}${fm(Math.abs(d))}</b><span class="xs mut">vs last week</span></div></div>
+    ${Object.keys(s.by_subject).length ? `<div class="chips mt8">${Object.entries(s.by_subject).map(([k, v]) => `<span class="pill" style="background:${SCOL[k]}22;color:${SCOL[k]}">${esc(k)} ${fm(v)}</span>`).join('')}</div>` : ''}
     <label>Best moment of the week</label><input id="w_best" value="${esc(ex?.best || '')}"><label>Biggest leak</label><input id="w_leak" value="${esc(ex?.leak || '')}">
-    <label>ONE thing I'll change next week (just one)</label><input id="w_chg" value="${esc(ex?.change || '')}">
+    <label>One thing I'll change next week (just one)</label><input id="w_chg" value="${esc(ex?.change || '')}">
     <label>Pre-mortem: it's next Sunday and the week went badly. Why?</label><input id="w_pre" value="${esc(ex?.premortem || '')}">
-    <label>So: IF that happens, THEN I will…</label><input id="w_if" value="${esc(ex?.ifthen || '')}"><div style="height:12px"></div><button class="btn-xl" data-act="saveWeekly">Save weekly review</button></div>`;
-  if (R.history.length) h += `<div class="card"><h3>Journal</h3>${R.history.map(r => `<div class="feed"><div class="row between"><b>${r.day}</b><span>${['😞', '😕', '😐', '🙂', '😄'][r.mood - 1]} ⚡${r.energy}/5</span></div><div class="sm">🏆 ${esc(r.win)}</div>${r.leak ? `<div class="sm mut">🕳 ${esc(r.leak)}</div>` : ''}${r.kind_note ? `<div class="sm" style="color:var(--acc2)">💬 ${esc(r.kind_note)}</div>` : ''}</div>`).join('')}</div>`;
+    <label>So: if that happens, then I will…</label><input id="w_if" value="${esc(ex?.ifthen || '')}"><button class="btn-xl mt12" data-act="saveWeekly">Save weekly review</button></section>`;
+  if (R.history.length) h += `<section class="card">${lbl('Journal')}${R.history.map(r => `<div class="feed"><div class="row between"><b>${esc(r.day)}</b><span class="xs mut">mood ${r.mood}/5 · energy ${r.energy}/5</span></div><div class="sm">${esc(r.win)}</div>${r.leak ? `<div class="sm mut">Leak: ${esc(r.leak)}</div>` : ''}${r.kind_note ? `<div class="sm acc">${esc(r.kind_note)}</div>` : ''}</div>`).join('')}</section>`;
   return h;
 }
 
 /* ---------- ME ---------- */
 function vMe() {
-  const I = S.ins, u = S.user, L = I.level, e = I.evidence, og = I.outgrow;
-  const pct = Math.round(og.ratio * 100);
-  const hm = I.heat.map(c => { const a = c.f ? '#3ea6ff66' : c.m === 0 ? '#1b1b2a' : `rgba(124,92,255,${Math.min(.25 + c.m / 240 * .75, 1)})`; return `<i title="${c.d}: ${fm(c.m)}${c.f ? ' ❄️' : ''}" style="background:${a}"></i>`; }).join('');
-  const hrmx = Math.max(...I.hours, 1);
-  const best = I.hours.indexOf(Math.max(...I.hours));
-  let h = `<div class="card glow"><div class="row"><div class="av" style="width:56px;height:56px;font-size:30px;background:${u.color}33;border:2px solid ${u.color}">${esc(u.emoji)}</div><div class="grow"><h2>${esc(u.display)}</h2><div class="mut sm">Level ${L.level} · ${L.emoji} ${esc(L.rank)} · ${L.xp} XP</div></div></div>
-    <div class="bar" style="margin:12px 0 4px"><i style="width:${L.pct}%"></i></div></div>`;
-  h += `<div class="card"><details><summary><b style="color:var(--tx)">Title ladder</b> · ${I.ladder.length} titles, next: ${L.next_rank ? L.next_emoji + ' ' + esc(L.next_rank) + ' (Lv ' + L.next_at + ')' : 'you are at the top'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .45}"><span style="font-size:22px;width:30px">${r.emoji}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">YOU</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(60 * (r.level - 1) ** 2).toLocaleString()} XP</span></div>`).join('')}</details></div>`;
-  h += `<div class="card"><h3>The Ragda meter</h3><p class="sm mut">Your last 7 days vs. the old A+ you (${og.baseline_h}h/day).</p><div class="row between"><div class="big" style="color:${pct >= 100 ? 'var(--good)' : 'var(--acc2)'}">${pct}%</div><div class="sm" style="text-align:right">${pct >= 130 ? '🦋 You are Ragdamaxed. The old you cannot keep up.' : pct >= 100 ? '🔥 You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
-    <div class="bar ${pct >= 100 ? 'g' : ''}" style="margin:8px 0"><i style="width:${Math.min(pct, 100)}%"></i></div>`;
-  if (I.ghost) h += `<h3 style="margin-top:14px">You vs your best week (ghost)</h3>${lines([{ v: I.ghost.cum, c: '#8b8ba3', d: 1, w: 2 }, { v: I.cum, c: '#22d3a6', w: 3 }])}<div class="xs mut">Grey dashed = your best week (${fm(I.ghost.total)}). Green = this week.</div>`;
-  h += `</div>`;
-  h += `<div class="card"><h3>Evidence locker</h3><p class="sm mut">When your brain says "I'm a failure", read the court record.</p><div class="grid3" style="margin:8px 0"><div class="stat"><b>${e.hours}h</b><span class="xs mut">focused</span></div><div class="stat"><b>${e.days_hit}</b><span class="xs mut">floor days</span></div><div class="stat"><b>${e.longest}</b><span class="xs mut">best streak</span></div><div class="stat"><b>${e.deep}</b><span class="xs mut">deep blocks</span></div><div class="stat"><b>${e.urges_won}</b><span class="xs mut">urges beaten</span></div><div class="stat"><b>${e.learned}</b><span class="xs mut">chapters</span></div></div>
-    ${e.wins.length ? '<h3 style="margin-top:8px">Your own wins</h3>' + e.wins.map(w => `<div class="sm" style="padding:3px 0">🏆 ${esc(w.win)} <span class="xs mut">${w.day}</span></div>`).join('') : ''}</div>`;
-  h += `<div class="card"><h3>Last 12 weeks</h3><div class="heat" style="margin:10px 0">${hm}</div><div class="xs mut">Brighter = more focus · blue = streak freeze saved you</div></div>`;
-  h += `<div class="card"><h3>Weekly hours</h3>${bars(I.weeks.map(w => w.m), '#7c5cff')}<div class="row between xs mut"><span>8 wks ago</span><span>this week ${fm(I.weeks[7].m)}</span></div></div>`;
-  if (I.hours.some(x => x)) h += `<div class="card"><h3>Your best focus hours</h3><div class="hrs" style="margin:10px 0">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm" style="margin-top:6px">Peak: <b>${best % 12 || 12}${best < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></div>`;
-  if (Object.keys(I.sub7).length) { const tot = Object.values(I.sub7).reduce((a, b) => a + b, 0); h += `<div class="card"><h3>Subject balance (7 days)</h3>${Object.entries(I.sub7).sort((a, b) => b[1] - a[1]).map(([s, m]) => `<div class="row" style="margin:6px 0"><span style="width:78px" class="sm">${s}</span><div class="bar grow"><i style="width:${m / tot * 100}%;background:${SCOL[s]}"></i></div><span class="xs mut" style="width:56px;text-align:right">${fm(m)}</span></div>`).join('')}</div>`; }
-  if (I.urge_triggers.length) h += `<div class="card"><h3>Your triggers</h3>${I.urge_triggers.map(t => `<span class="pill" style="margin-right:6px">${esc(t.trigger)} ×${t.n}</span>`).join('')}</div>`;
-  h += `<div class="card"><h3>Badges (${I.badges.filter(b => b.got).length}/${I.badges.length})</h3><div class="grid3" style="margin-top:10px">${I.badges.map(b => `<div class="badge ${b.got ? '' : 'off'}"><s>${b.emoji}</s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div></div>`).join('')}</div></div>`;
-  if (u.admin) h += `<div class="card"><h3>Server</h3><p class="sm mut">You run this crew. Live stats, PIN resets, database backup.</p><button class="btn-xl" data-act="admin">🛠️ Open server dashboard</button></div>`;
-  h += `<div class="card"><h3>Settings</h3><label>Display name</label><input id="s_name" value="${esc(u.display)}"><label>Identity: "I am becoming someone who…"</label><input id="s_id" value="${esc(u.identity)}" placeholder="shows up before he feels like it">
+  const I = S.ins, u = S.user, L = I.level, e = I.evidence, og = I.outgrow, pct = Math.round(og.ratio * 100);
+  const hm = I.heat.map(c => { const a = c.f ? '#5aa9ff66' : c.m === 0 ? '#17171c' : `rgba(124,106,247,${Math.min(.25 + c.m / 240 * .75, 1)})`; return `<i title="${esc(c.d)}: ${fm(c.m)}${c.f ? ' (freeze)' : ''}" style="background:${a}"></i>`; }).join('');
+  const hrmx = Math.max(...I.hours, 1), best = I.hours.indexOf(Math.max(...I.hours));
+  let h = `<section class="card hero"><div class="row g12">${avatar(u.emoji, u.color, 'xl')}<div class="grow"><h2>${esc(u.display)}</h2><div class="mut sm">Level ${L.level} · ${esc(L.emoji)} ${esc(L.rank)} · ${L.xp.toLocaleString()} XP</div></div></div>
+    <div class="bar xp mt12"><i style="width:${L.pct}%"></i></div>
+    <details data-k="ladder"><summary>Title ladder · ${I.ladder.length} titles · ${L.next_rank ? 'next: ' + esc(L.next_emoji) + ' ' + esc(L.next_rank) + ' at Lv ' + L.next_at : 'top title reached'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .4}"><span class="lad-e">${esc(r.emoji)}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">you</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(60 * (r.level - 1) ** 2).toLocaleString()} XP</span></div>`).join('')}</details></section>`;
+  h += `<section class="card">${lbl('The Ragda meter')}<p class="sm mut">Your last 7 days against the old A+ you (${og.baseline_h}h a day).</p><div class="row between"><div class="bignum" style="color:${pct >= 100 ? 'var(--good)' : 'var(--tx)'}">${pct}%</div><div class="sm rt-text">${pct >= 130 ? 'You are Ragdamaxed. The old you cannot keep up.' : pct >= 100 ? 'You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
+    <div class="bar mt8 ${pct >= 100 ? 'g' : ''}"><i style="width:${Math.min(pct, 100)}%"></i></div>
+    ${I.ghost ? `<div class="lbl2">You vs your best week</div>${lines([{ v: I.ghost.cum, c: '#7c7c88', d: 1, w: 2 }, { v: I.cum, c: '#3dd6a0', w: 3 }])}<div class="xs mut">Dashed is your best week (${fm(I.ghost.total)}). Green is this week.</div>` : ''}</section>`;
+  h += `<section class="card">${lbl('Evidence locker')}<p class="sm mut">When your brain says "I'm a failure", read the court record.</p><div class="grid3"><div class="stat"><b>${e.hours}h</b><span class="xs mut">focused</span></div><div class="stat"><b>${e.days_hit}</b><span class="xs mut">floor days</span></div><div class="stat"><b>${e.longest}</b><span class="xs mut">best streak</span></div><div class="stat"><b>${e.deep}</b><span class="xs mut">deep blocks</span></div><div class="stat"><b>${e.urges_won}</b><span class="xs mut">urges beaten</span></div><div class="stat"><b>${e.learned}</b><span class="xs mut">chapters</span></div></div>
+    ${e.wins.length ? '<div class="lbl2">Your own wins</div>' + e.wins.map(w => `<div class="sm" style="padding:3px 0">${esc(w.win)} <span class="xs mut">${esc(w.day)}</span></div>`).join('') : ''}</section>`;
+  h += `<section class="card">${lbl('Last 12 weeks')}<div class="heat">${hm}</div><div class="xs mut mt8">Brighter means more focus. Blue means a streak freeze saved you.</div></section>`;
+  h += `<section class="card">${lbl('Weekly hours')}${bars(I.weeks.map(w => w.m), '#7c6af7')}<div class="row between xs mut"><span>8 weeks ago</span><span>this week ${fm(I.weeks[7].m)}</span></div></section>`;
+  if (I.hours.some(x => x)) h += `<section class="card">${lbl('Your best focus hours')}<div class="hrs">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut mt4"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm mt8">Peak: <b>${best % 12 || 12}${best < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></section>`;
+  if (Object.keys(I.sub7).length) { const tot = Object.values(I.sub7).reduce((a, b) => a + b, 0); h += `<section class="card">${lbl('Subject balance', '7 days')}${Object.entries(I.sub7).sort((a, b) => b[1] - a[1]).map(([s, m]) => `<div class="row g8" style="margin:8px 0"><span class="sm w78">${esc(s)}</span><div class="bar grow"><i style="width:${m / tot * 100}%;background:${SCOL[s] || '#9a9aa8'}"></i></div><span class="xs mut w56 r">${fm(m)}</span></div>`).join('')}</section>`; }
+  if (I.urge_triggers.length) h += `<section class="card">${lbl('Your triggers')}<div class="chips">${I.urge_triggers.map(t => `<span class="pill">${esc(t.trigger)} ×${t.n}</span>`).join('')}</div></section>`;
+  h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge ${b.got ? '' : 'off'}"><s>${esc(b.emoji)}</s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div></div>`).join('')}</div></section>`;
+  if (u.admin) h += `<section class="card">${lbl('Server')}<p class="sm mut">You run this crew. Live stats, PIN resets, moderation, backups.</p><button class="btn-xl" data-act="admin">Open server dashboard</button></section>`;
+  h += `<section class="card">${lbl('Settings')}<label>Display name</label><input id="s_name" value="${esc(u.display)}" maxlength="20"><label>Identity: "I am becoming someone who…"</label><input id="s_id" value="${esc(u.identity)}" placeholder="shows up before he feels like it" maxlength="140">
     <div class="grid2"><div><label>Old A+ you studied (hrs/day)</label><input id="s_base" type="number" step="0.5" value="${u.baseline_h}"></div><div><label>Daily floor (min)</label><input id="s_floor" type="number" value="${u.daily_min}"></div></div>
-    <label>Exams (name + date)</label>${[0, 1, 2].map(i => { const x = u.exams[i] || {}; return `<div class="row" style="margin-bottom:6px"><input id="s_en${i}" placeholder="JEE Main" value="${esc(x.name || '')}"><input id="s_ed${i}" type="date" value="${x.date || ''}" style="width:150px"></div>`; }).join('')}
-    <label>Avatar emoji & color</label><div class="row"><input id="s_emo" value="${esc(u.emoji)}" style="width:80px"><input id="s_col" type="color" value="${u.color}" style="width:70px;padding:3px"></div><div style="height:12px"></div>
-    <button class="btn-p btn-xl" data-act="saveSettings">Save</button><button style="margin-top:8px;width:100%" data-act="notif">🔔 Enable alerts when friends start a block</button><button class="btn-d" style="margin-top:8px;width:100%" data-act="logout">Log out</button></div>`;
-  if (I.xp_log.length) h += `<div class="card"><h3>Recent XP</h3>${I.xp_log.map(x => `<div class="row between sm" style="padding:3px 0"><span class="mut">${esc(x.label)}</span><b>+${x.amount}</b></div>`).join('')}</div>`;
+    <label>Exams (name and date)</label>${[0, 1, 2].map(i => { const x = u.exams[i] || {}; return `<div class="row g8" style="margin-bottom:6px"><input id="s_en${i}" placeholder="JEE Main" value="${esc(x.name || '')}"><input id="s_ed${i}" type="date" value="${esc(x.date || '')}" style="width:156px"></div>`; }).join('')}
+    <label>Avatar emoji and colour</label><div class="row g8"><input id="s_emo" value="${esc(u.emoji)}" style="width:84px"><input id="s_col" type="color" value="${esc(u.color)}" style="width:72px;padding:3px"></div>
+    <button class="btn-p btn-xl mt12" data-act="saveSettings">Save</button><button class="btn-xl mt8" data-act="notif">Enable alerts when friends start a block</button><button class="btn-d btn-xl mt8" data-act="logout">Log out</button></section>`;
+  if (I.xp_log.length) h += `<section class="card">${lbl('Recent XP')}${I.xp_log.map(x => `<div class="row between sm" style="padding:4px 0"><span class="mut">${esc(x.label)}</span><b class="num">${x.amount > 0 ? '+' : ''}${x.amount}</b></div>`).join('')}</section>`;
   return h;
 }
 
 /* ---------- onboarding & urge ---------- */
 function onboard() {
-  modal(`<h2>Set the terms.</h2><p class="mut sm">You were an A+ student. That person still exists — they just need a system. Set the bar they'd set.</p>
-  <label>Who are you becoming? ("I am someone who…")</label><input id="o_id" placeholder="studies before he's motivated">
-  <label>On your best A+ days, how many hours/day did you study?</label><input id="o_base" type="number" step="0.5" value="5">
-  <label>Your daily FLOOR (minutes) — the minimum that keeps the streak alive, even on bad days</label><input id="o_floor" type="number" value="45">
-  <label>Exam #1 (name + date)</label><div class="row"><input id="o_n1" placeholder="JEE Main" value="JEE Main"><input id="o_d1" type="date" style="width:150px"></div>
-  <label>Exam #2</label><div class="row"><input id="o_n2" placeholder="CBSE Boards" value="CBSE Boards"><input id="o_d2" type="date" style="width:150px"></div><div style="height:14px"></div>
-  <button class="btn-p btn-xl" data-act="saveOnboard">Let's go</button>`);
+  modal(`<h2>Set the terms.</h2><p class="mut sm">You were an A+ student. That person still exists, they just need a system. Set the bar they'd set.</p>
+  <label>Who are you becoming? ("I am someone who…")</label><input id="o_id" placeholder="studies before he's motivated" maxlength="140">
+  <label>On your best A+ days, how many hours a day did you study?</label><input id="o_base" type="number" step="0.5" value="5">
+  <label>Your daily floor (minutes). The minimum that keeps the streak alive, even on bad days.</label><input id="o_floor" type="number" value="45">
+  <label>Exam 1 (name and date)</label><div class="row g8"><input id="o_n1" placeholder="JEE Main" value="JEE Main"><input id="o_d1" type="date" style="width:156px"></div>
+  <label>Exam 2</label><div class="row g8"><input id="o_n2" placeholder="CBSE Boards" value="CBSE Boards"><input id="o_d2" type="date" style="width:156px"></div>
+  <button class="btn-p btn-xl mt12" data-act="saveOnboard">Let's go</button>`, true);
 }
 function urgeFlow() {
   const trig = ['Instagram', 'Reels/Shorts', 'YouTube', 'Gaming', 'Texting', 'Overthinking', 'Just tired', 'Other'];
-  modal(`<h2>🧠 Urge surfing</h2><p class="sm mut">An urge peaks and passes in about 90 seconds if you don't feed it. Name it. Ride it.</p><div class="row wrap">${trig.map(t => `<span class="chip" data-act="urgeStart" data-v="${t}">${t}</span>`).join('')}</div><button style="margin-top:14px;width:100%" data-act="closeModal">Cancel</button>`);
+  modal(`<h2>Urge surfing</h2><p class="sm mut">An urge peaks and passes in about 90 seconds if you don't feed it. Name it. Ride it.</p><div class="chips mt12">${trig.map(t => `<button class="chip" data-act="urgeStart" data-v="${t}">${t}</button>`).join('')}</div><button class="btn-xl mt12" data-act="closeModal">Cancel</button>`);
 }
 function urgeRun(trigger) {
-  S.urge = { trigger, left: 90 };
-  const draw = () => {
+  S.urge = { trigger, left: 90 }; S.urgeTrig = trigger;
+  modal(`<div class="c"><div class="xs mut">${esc(trigger)} urge</div><div class="bignum" id="ur_n">90</div><p class="b acc" id="ur_t">Breathe in…</p><p class="sm mut">Notice where you feel it. You don't have to obey it.</p>
+    <button class="btn-p btn-xl" data-act="urgeDone" data-v="redirected">Start 5 minutes of study instead</button><button class="btn-g btn-xl mt8" data-act="urgeDone" data-v="resisted">It passed. I'm good</button><button class="btn-xl mt8" data-act="urgeDone" data-v="gave_in">I gave in (no judgement, log it)</button></div>`, true);
+  const step = () => {
     const U = S.urge; if (!U) return;
-    const ph = U.left % 14; const breathe = ph > 10 ? 'Breathe in…' : ph > 6 ? 'Hold…' : 'Out, slowly…';
-    $('#modal').innerHTML = `<div class="c"><h3>${esc(trigger)} urge</h3><div class="big" style="font-size:72px">${U.left}</div><p class="b" style="color:var(--acc2)">${breathe}</p><p class="sm mut">Notice where you feel it. You don't have to obey it.</p>
-      <button class="btn-p btn-xl" data-act="urgeDone" data-v="redirected">Start 5 minutes of study instead</button><button class="btn-g btn-xl" style="margin-top:8px" data-act="urgeDone" data-v="resisted">It passed. I'm good ✓</button><button style="margin-top:8px;width:100%" data-act="urgeDone" data-v="gave_in">I gave in (no judgement — log it)</button></div>`;
-    if (U.left <= 0) { S.urge = null; return; }
-    U.left--; S._ut = setTimeout(draw, 1000);
+    const n = $('#ur_n'), tx = $('#ur_t'); if (!n) { S.urge = null; return; }
+    n.textContent = U.left; const ph = U.left % 14;
+    tx.textContent = U.left <= 0 ? 'The wave has passed.' : ph > 10 ? 'Breathe in…' : ph > 6 ? 'Hold…' : 'Out, slowly…';
+    if (U.left <= 0) return;
+    U.left--; S._ut = setTimeout(step, 1000);
   };
-  clearTimeout(S._ut); draw();
+  clearTimeout(S._ut); step();
 }
-
 /* ---------- actions ---------- */
 const val = id => ($('#' + id) || {}).value;
 const A = {
-  async login() { try { const r = await api('login', { username: val('a_user'), pin: val('a_pin') }); S.user = r.user; await go('today'); if (!S.user.onboarded) onboard(); } catch (e) { } },
-  async register() { try { const r = await api('register', { username: val('a_user'), pin: val('a_pin'), crew_code: val('a_code'), crew_name: val('a_cname') }); S.user = r.user; await go('today'); onboard(); } catch (e) { } },
+  reload() { location.reload(); },
+  async login() { try { const r = await api('login', { username: val('a_user'), pin: val('a_pin') }); S.user = r.user; S.tab = 'today'; await go('today'); if (!S.user.onboarded) onboard(); } catch (e) { } },
+  async register() { try { const r = await api('register', { username: val('a_user'), pin: val('a_pin'), crew_code: val('a_code'), crew_name: val('a_cname') }); S.user = r.user; S.tab = 'today'; await go('today'); onboard(); } catch (e) { } },
   authMode() { S.authMode = S.authMode === 'login' ? 'register' : 'login'; renderAuth(); },
-  async logout() { await api('logout', {}); chatReset(); S.user = null; S.ins = null; renderAuth(); },
+  async logout() { try { await api('logout', {}); } catch (e) { } onLoggedOut(); },
   closeModal() { clearTimeout(S._ut); S.urge = null; closeModal(); },
   async tab(el) { if (el.dataset.sub) S.sub = el.dataset.sub; await go(el.dataset.v); },
-  pickSub(el) { S.pickSub = el.dataset.v; render(); },
-  pickDur(el) { S.pickDur = +el.dataset.v; render(); },
-  pickMode(el) { S.pickMode = el.dataset.v; render(); },
+  pickSub(el) { S.pickSub = el.dataset.v; PREF.set('sub', S.pickSub); render(); },
+  pickDur(el) { S.pickDur = +el.dataset.v; PREF.set('dur', S.pickDur); render(); },
+  pickMode(el) { S.pickMode = el.dataset.v; PREF.set('mode', S.pickMode); render(); },
   crewPeriod(el) { S.crewPeriod = el.dataset.v; render(); },
-  async startTimer() { await api('timer/start', { subject: S.pickSub, target: S.pickDur, mode: S.pickMode }); await go('today'); },
-  async start5() { await api('timer/start', { subject: S.pickSub, target: 5 }); await go('today'); },
-  async extend() { await api('timer/extend', { add: 20 }); await go('today'); },
-  async distract() { await api('timer/distract', {}); const d = $('#dcount'); if (d) d.textContent = +d.textContent + 1; S.today.timer.distractions++; },
-  async stopTimer() { const r = await api('timer/stop', {}); if (r.too_short) toast('Under 5 minutes — not logged', 'Even 5 counts. Go again.'); else { if (r.capped) toast('Stopwatch capped at 4h', 'Anything past that does not count.'); if (r.minutes >= 25) beep(); } await go('today'); },
-  async discard() { if (confirm('Discard this block? Nothing will be logged.')) { await api('timer/stop', { discard: true }); await go('today'); } },
-  async manual() { await api('focus', { subject: val('mf_s'), minutes: +val('mf_m') }); await go('today'); },
-  async delFocus(el) { await api('focus/delete', { id: +el.dataset.id }); await go('today'); },
-  async habit(el) { const on = S.today.habits.includes(el.dataset.id); await api('habit', { habit: el.dataset.id, done: !on }); await go('today'); },
-  async chest() { const r = await api('chest', {}); confetti(); modal(`<div class="c"><div style="font-size:64px">${r.tier === 'epic' ? '💎' : r.tier === 'rare' ? '🎁' : '📦'}</div><h2>${esc(r.label)}</h2><div class="mut">${r.tier.toUpperCase()}</div><button class="btn-p btn-xl" style="margin-top:12px" data-act="closeModal">Nice</button></div>`); await go('today'); },
-  async addPlan(el) { const t = val('pl_t'); if (!t) return toast('Write the task first'); await api('plan', { when: el.dataset.v, text: t, cue: val('pl_c') }); await go('today'); },
-  async togglePlan(el) { await api('plan/toggle', { id: +el.dataset.id }); await go('today'); },
-  async delPlan(el) { await api('plan/delete', { id: +el.dataset.id }); await go('today'); },
+  async startTimer() { await api('timer/start', { subject: S.pickSub, target: S.pickDur, mode: S.pickMode === 'stopwatch' ? 'stopwatch' : 'timer' }); await refresh(); },
+  async start5() { await api('timer/start', { subject: S.pickSub, target: 5 }); await refresh(); },
+  async startPomo() {
+    const c = pomoNorm(S.pomoCfg); S.pomoCfg = c; PREF.set('pomo', c);
+    await api('pomo/start', { subject: S.pickSub, total: c.total, work: c.work, brk: c.brk }); await refresh();
+  },
+  async skipBreak() { await api('pomo/skip', {}); await refresh(); },
+  async endPlan() { if (!confirm('End the pomodoro plan? Completed blocks stay logged.')) return; await api('pomo/stop', {}); S.beepKey = null; await refresh(); },
+  async extend() { await api('timer/extend', { add: 20 }); S.beeped = false; S.msgKey = ''; await refresh(); },
+  async distract() {
+    await api('timer/distract', {});
+    if (S.today?.timer) { S.today.timer.distractions++; $$('#dcount,#fs-dcount').forEach(n => { n.textContent = S.today.timer.distractions; }); }
+  },
+  async stopTimer() { if (S.today?.pomo && !confirm('End the pomodoro plan and log this block?')) return; await finishTimer(); },
+  async discard() { if (confirm('Discard this block? Nothing will be logged.')) await finishTimer({ discard: true }); },
+  async manual() { await api('focus', { subject: val('mf_s'), minutes: +val('mf_m') }); await refresh(); },
+  async delFocus(el) { await api('focus/delete', { id: +el.dataset.id }); await refresh(); },
+  async habit(el) { const on = S.today.habits.includes(el.dataset.id); await api('habit', { habit: el.dataset.id, done: !on }); await refresh(); },
+  async chest() {
+    const r = await api('chest', {}); confetti();
+    modal(`<div class="c"><div class="xs mut up">${esc(r.tier.toUpperCase())}</div><div class="bignum">${esc(r.label)}</div><p class="sm mut mt8">Daily chest opened. Come back tomorrow.</p><button class="btn-p btn-xl mt12" data-act="closeModal">Nice</button></div>`);
+    await refresh();
+  },
+  async addPlan(el) { const t = val('pl_t'); if (!t) return toast('Write the task first'); await api('plan', { when: el.dataset.v, text: t, cue: val('pl_c') }); await refresh(); },
+  async togglePlan(el) { await api('plan/toggle', { id: +el.dataset.id }); await refresh(); },
+  async delPlan(el) { await api('plan/delete', { id: +el.dataset.id }); await refresh(); },
   urge() { urgeFlow(); }, urgeStart(el) { urgeRun(el.dataset.v); },
   async urgeDone(el) {
-    const tr = S.urge?.trigger || ($('#modal h3')?.textContent || '').replace(' urge', ''); const o = el.dataset.v; clearTimeout(S._ut); S.urge = null;
-    await api('urge', { outcome: o, trigger: tr }); closeModal();
-    if (o === 'redirected') { await api('timer/start', { subject: S.pickSub, target: 5 }); } else if (o === 'gave_in') toast('Logged. No shame.', 'What would make the next one easier?');
-    await go('today');
+    const tr = S.urgeTrig || 'Other', o = el.dataset.v; clearTimeout(S._ut); S.urge = null;
+    try { await api('urge', { outcome: o, trigger: tr }); } catch (e) { closeModal(); return; }
+    closeModal();
+    if (o === 'redirected') { try { await api('timer/start', { subject: S.pickSub, target: 5 }); } catch (e) { } }
+    else if (o === 'gave_in') toast('Logged. No shame.', 'What would make the next one easier?');
+    await refresh();
   },
-  async sub(el) { S.sub = el.dataset.v; render(); },
-  async chap(el) { await api('chapter', { id: +el.dataset.id, status: +el.dataset.s }); S.syl = await api('syllabus'); S.ins = await api('insights'); render(); },
+  sub(el) { S.sub = el.dataset.v; render(); },
+  async chap(el) { await api('chapter', { id: +el.dataset.id, status: +el.dataset.s }); [S.syl, S.ins] = await Promise.all([api('syllabus'), api('insights')]); render(); },
   async addChap(el) { const n = val('ca_' + el.dataset.v); if (!n) return; await api('chapter/add', { subject: el.dataset.v, name: n }); S.syl = await api('syllabus'); render(); },
   async rev(el) { await api('revision', { id: +el.dataset.id, result: el.dataset.r }); S.syl = await api('syllabus'); render(); },
-  async addTest() { await api('test', { name: val('t_n') || 'Test', kind: 'mock', subject: val('t_s'), score: +val('t_sc'), max: +val('t_mx'), concept: +val('t_c') || 0, silly: +val('t_si') || 0, time: +val('t_t') || 0 }); S.tests = await api('tests'); render(); },
-  mood(el) { document.querySelectorAll(`#${el.dataset.g} span`).forEach(s => s.classList.remove('on')); el.classList.add('on'); },
-  async saveReflect() {
-    const g = id => { const x = [...document.querySelectorAll(`#${id} span`)].findIndex(s => s.classList.contains('on')); return x < 0 ? 3 : x + 1; };
-    await api('reflect', { mood: g('f_mood'), energy: g('f_energy'), win: val('f_win'), leak: val('f_leak'), kind_note: val('f_kind'), tomorrow: val('f_tom'), cue: val('f_cue') }); toast('Reflection saved', 'Tomorrow is already planned.'); await go('reflect');
+  async addTest() {
+    const sc = val('t_sc'), mx = val('t_mx'); if (sc === '' || !mx) return toast('Enter your score and the maximum');
+    await api('test', { name: val('t_n') || 'Test', kind: 'mock', subject: val('t_s'), score: +sc, max: +mx, concept: +val('t_c') || 0, silly: +val('t_si') || 0, time: +val('t_t') || 0 });
+    S.tests = await api('tests'); render();
   },
-  async saveWeekly() { await api('weekly', { best: val('w_best'), leak: val('w_leak'), change: val('w_chg'), premortem: val('w_pre'), ifthen: val('w_if') }); toast('Weekly review saved'); await go('reflect'); },
-  async joinCrew() { await api('crew/join', { code: val('cj') }); await go('crew'); },
-  async createCrew() { await api('crew/create', { name: val('cn') }); await go('crew'); },
-  async nudge(el) { await api('nudge', { to: +el.dataset.id }); toast('Nudged 👊'); await go('crew'); },
+  mood(el) { $$(`#${el.dataset.g} span`).forEach(s => s.classList.remove('on')); el.classList.add('on'); },
+  async saveReflect() {
+    const g = id => { const x = $$(`#${id} span`).findIndex(s => s.classList.contains('on')); return x < 0 ? 3 : x + 1; };
+    await api('reflect', { mood: g('f_mood'), energy: g('f_energy'), win: val('f_win'), leak: val('f_leak'), kind_note: val('f_kind'), tomorrow: val('f_tom'), cue: val('f_cue') });
+    toast('Reflection saved', 'Tomorrow is already planned.'); await refresh();
+  },
+  async saveWeekly() { await api('weekly', { best: val('w_best'), leak: val('w_leak'), change: val('w_chg'), premortem: val('w_pre'), ifthen: val('w_if') }); toast('Weekly review saved'); await refresh(); },
+  async joinCrew() { await api('crew/join', { code: val('cj') }); await refresh(); },
+  async createCrew() { await api('crew/create', { name: val('cn') }); await refresh(); },
+  async nudge(el) { await api('nudge', { to: +el.dataset.id }); toast('Nudged'); await refresh(); },
   async react(el) { await api('react', { feed_id: +el.dataset.id, emoji: el.dataset.e }); S.crew = await api('crew'); render(); },
-  async duel() { await api('duel', { opponent: +val('du_o'), days: +val('du_d') }); toast('Challenge sent ⚔️'); await go('crew'); },
-  async acceptDuel(el) { await api('duel/accept', { id: +el.dataset.id }); await go('crew'); },
-  copy(el) { navigator.clipboard?.writeText(el.dataset.v); toast('Invite code copied'); },
+  async duel() { await api('duel', { opponent: +val('du_o'), days: +val('du_d') }); toast('Challenge sent'); await refresh(); },
+  async acceptDuel(el) { await api('duel/accept', { id: +el.dataset.id }); await refresh(); },
+  copy(el) { try { navigator.clipboard?.writeText(el.dataset.v); toast('Invite code copied'); } catch (e) { toast('Copy failed', el.dataset.v); } },
   async saveOnboard() {
     const ex = [[val('o_n1'), val('o_d1')], [val('o_n2'), val('o_d2')]].filter(x => x[1]).map(x => ({ name: x[0] || 'Exam', date: x[1] }));
-    const r = await api('settings', { identity: val('o_id'), baseline_h: +val('o_base'), daily_min: +val('o_floor'), exams: ex.length ? ex : undefined, onboarded: true }); S.user = r.user; closeModal(); await go('today');
+    const r = await api('settings', { identity: val('o_id'), baseline_h: +val('o_base'), daily_min: +val('o_floor'), exams: ex.length ? ex : undefined, onboarded: true }); S.user = r.user; closeModal(); await refresh();
   },
   async saveSettings() {
     const ex = [0, 1, 2].map(i => ({ name: val('s_en' + i) || 'Exam', date: val('s_ed' + i) })).filter(x => x.date);
-    const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, emoji: val('s_emo'), color: val('s_col') }); S.user = r.user; toast('Saved'); await go('me');
+    const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, emoji: val('s_emo'), color: val('s_col') }); S.user = r.user; toast('Saved'); await refresh();
   },
   async notif() { if (!('Notification' in window)) return toast('Not supported here'); const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Alerts on while the app is open' : 'Blocked'); },
   enterFullscreenFocus() { enterFullscreenFocus(); },
   exitFullscreenFocus() { exitFullscreenFocus(); },
-  fsClockNext() { fsClockNext(); },
-  fsClockPrev() { fsClockPrev(); },
-  logAndExitFocus() { logAndExitFocus(); },
-  openPomoModal() { openPomoModal(); },
-  startPomo() { startPomo(); },
+  fsClockNext() { fsStep(1); },
+  fsClockPrev() { fsStep(-1); },
+  async logAndExitFocus() { if (S.today?.pomo && !confirm('End the pomodoro plan and log this block?')) return; try { await finishTimer(); } catch (e) { } },
 };
-document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && A[el.dataset.act]) { e.preventDefault(); A[el.dataset.act](el, e); } });
-document.addEventListener('keydown', e => { if (e.key === 'Enter' && S.user === null && ($('#a_pin') === document.activeElement || $('#a_user') === document.activeElement)) A[S.authMode === 'login' ? 'login' : 'register'](); });
-
+/* one click handler for the whole app. A busy flag stops double taps from double submitting. */
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]'); if (!el || !A[el.dataset.act]) return;
+  e.preventDefault();
+  if (el.dataset.busy) return;
+  el.dataset.busy = '1'; el.classList.add('busy');
+  try { await A[el.dataset.act](el, e); }
+  catch (x) { if (!x || !x.api) console.error(x); }
+  finally { delete el.dataset.busy; el.classList.remove('busy'); }
+});
+document.addEventListener('pointerdown', () => { S.lastPtr = Date.now(); }, { passive: true });
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal' && !$('#modal').classList.contains('lock')) A.closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (S.fs) exitFullscreenFocus(); else if (modalOpen() && !$('#modal').classList.contains('lock')) A.closeModal(); return; }
+  if (e.key === 'Enter' && S.user === null && e.target.closest && e.target.closest('.auth') && e.target.tagName === 'INPUT') A[S.authMode === 'login' ? 'login' : 'register']();
+});
+document.addEventListener('input', e => {
+  const id = e.target.id || '';
+  if (id.startsWith('pomo_')) {
+    S.pomoCfg = { total: +val('pomo_total'), work: +val('pomo_work'), brk: +val('pomo_brk') };
+    const p = $('#pomo_prev'); if (p) p.textContent = pomoPrev();
+  }
+});
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && S.fs && S.fsNative) { exitFullscreenFocus(); } });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !S.user) return;
+  if (S.fs) requestWakeLock();
+  if (S.tab === 'today' && S.today && (S.today.timer || S.today.pomo)) { syncToday(); tickOnce(); }
+});
 /* ---------- CHAT: text only. Crew room + private DMs ---------- */
 const CH = { threads: [], people: {}, open: null, msgs: [], more: false, seq: -1, unread: {}, total: 0, run: 0, ctl: null, notified: 0, loading: false, reply: null, sel: null, edit: null };
 let chatSending = false;
@@ -677,402 +991,88 @@ setInterval(async () => {
   } catch (e) { }
 }, 12000);
 
-/* ---------- fullscreen focus mode ---------- */
-const FULLSCREEN_CLOCKS = ['digital', 'analog', 'minimal', 'progress', 'orbit'];
-let fullscreenMode = null;
-let fullscreenClockType = 'digital';
-let fullscreenStartTime = 0;
-let fullscreenTargetMs = 0;
-let fullscreenTimerId = null;
-let fullscreenWakelock = null;
-let fullscreenNotificationsEnabled = false;
-
-function enterFullscreenFocus() {
-  if (!S.today?.timer) return;
-  fullscreenMode = true;
-  // Use local S.t0 which is kept in sync by tick(), not stale server elapsed
-  fullscreenStartTime = S.t0 || (Date.now() - (S.today.timer.elapsed * 1000));
-  fullscreenTargetMs = S.today.timer.target * 60 * 1000;
-  fullscreenClockType = 'digital';
-  requestWakeLock();
-  blockNotifications();
-  renderFullscreenFocus();
-}
-
-function exitFullscreenFocus() {
-  fullscreenMode = false;
-  releaseWakeLock();
-  unblockNotifications();
-  if (fullscreenTimerId) clearInterval(fullscreenTimerId);
-  fullscreenTimerId = null;
-  const fs = $('#fullscreen-focus-overlay');
-  if (fs) fs.remove();
-}
-
-function requestWakeLock() {
-  if ('wakeLock' in navigator) {
-    navigator.wakeLock.request('screen').then(wl => {
-      fullscreenWakelock = wl;
-      wl.addEventListener('release', () => { fullscreenWakelock = null; });
-    }).catch(() => {});
-  }
-}
-
-function releaseWakeLock() {
-  if (fullscreenWakelock) {
-    fullscreenWakelock.release().catch(() => {});
-    fullscreenWakelock = null;
-  }
-}
-
-function blockNotifications() {
-  fullscreenNotificationsEnabled = ('Notification' in window) && Notification.permission === 'granted';
-  if (fullscreenNotificationsEnabled && 'Notification' in window) {
-    // We can't truly block notifications, but we can suppress our own
-    // The server doesn't push notifications during focus anyway
-  }
-}
-
-function unblockNotifications() {
-  // Restore notification handling
-}
-
-function renderFullscreenFocus() {
-  const tm = S.today.timer;
-  const el = (Date.now() - fullscreenStartTime);
-  const target = tm.mode === 'stopwatch' ? Infinity : fullscreenTargetMs;
-  const rem = target - el;
-  const isStopwatch = tm.mode === 'stopwatch';
-  const progress = isStopwatch ? 0 : Math.max(0, Math.min(1, el / target));
-  const mins = Math.floor(el / 60000);
-  const secs = Math.floor((el % 60000) / 1000);
-  
-  const clockHtml = renderClock(fullscreenClockType, el, target, isStopwatch, mins, secs, progress);
-  const milestoneHtml = renderMilestones(mins);
-  
-  // Create or update overlay
-  let overlay = $('#fullscreen-focus-overlay');
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'fullscreen-focus-overlay';
-    overlay.className = 'fullscreen-focus-overlay';
-    document.body.appendChild(overlay);
-  }
-  overlay.innerHTML = `
-    <div id="fullscreen-focus" class="fullscreen-focus" data-clock="${fullscreenClockType}">
-      <div class="fs-header">
-        <div class="fs-subject">${esc(tm.subject)}</div>
-        <div class="fs-controls">
-          <button class="fs-btn" data-act="fsClockPrev" title="Previous clock">‹</button>
-          <span class="fs-clock-name">${fullscreenClockType}</span>
-          <button class="fs-btn" data-act="fsClockNext" title="Next clock">›</button>
-        </div>
-      </div>
-      <div class="fs-clock-area">${clockHtml}</div>
-      <div class="fs-milestones">${milestoneHtml}</div>
-      <div class="fs-footer">
-        <button class="fs-btn fs-btn-exit" data-act="exitFullscreenFocus">✕ Exit focus mode</button>
-        <button class="fs-btn fs-btn-log" data-act="logAndExitFocus">✅ Log & exit (${fm(Math.floor(el / 60000))})</button>
-      </div>
-    </div>
-  `;
-  
-  // Start the clock update loop ONLY ONCE
-  if (!fullscreenTimerId) {
-    fullscreenTimerId = setInterval(renderFullscreenFocus, isStopwatch ? 500 : 200);
-  }
-}
-
-function renderClock(type, elapsed, target, isStopwatch, mins, secs, progress) {
-  const hh = Math.floor(elapsed / 3600000);
-  const mm = Math.floor((elapsed % 3600000) / 60000);
-  const ss = Math.floor((elapsed % 60000) / 1000);
-  const timeStr = (hh ? String(hh).padStart(2, '0') + ':' : '') + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
-  
-  switch (type) {
-    case 'digital':
-      return `<div class="fs-clock fs-digital"><div class="fs-time">${timeStr}</div><div class="fs-label">${isStopwatch ? 'Stopwatch' : 'Target: ' + fm(target / 60000)}</div></div>`;
-      
-    case 'analog':
-      const angle = isStopwatch ? (elapsed / 1000) % 60 / 60 * 360 : progress * 360;
-      return `<div class="fs-clock fs-analog">
-        <svg width="280" height="280" viewBox="0 0 280 280">
-          <circle cx="140" cy="140" r="120" stroke="#262638" stroke-width="16" fill="none"/>
-          <circle cx="140" cy="140" r="120" stroke="var(--acc)" stroke-width="16" fill="none" stroke-linecap="round" stroke-dasharray="754" stroke-dashoffset="${754 * (1 - progress)}" transform="rotate(-90 140 140)"/>
-          <circle cx="140" cy="140" r="8" fill="var(--acc)"/>
-        </svg>
-        <div class="fs-time-analog">${timeStr}</div>
-        <div class="fs-label">${isStopwatch ? 'Stopwatch' : 'Target: ' + fm(target / 60000)}</div>
-      </div>`;
-      
-    case 'minimal':
-      return `<div class="fs-clock fs-minimal">
-        <div class="fs-time-minimal">${timeStr}</div>
-        <div class="fs-bar-minimal"><i style="width:${Math.min(progress * 100, 100)}%"></i></div>
-        <div class="fs-label">${isStopwatch ? 'Stopwatch — no target' : 'Target: ' + fm(target / 60000) + ' · ' + Math.round(progress * 100) + '%'}</div>
-      </div>`;
-      
-    case 'progress':
-      const blocks = Math.ceil((target / 60000) / 25) || 1;
-      const completedBlocks = Math.floor(mins / 25);
-      let blocksHtml = '';
-      for (let i = 0; i < blocks; i++) {
-        const filled = i < completedBlocks;
-        const current = i === completedBlocks && !isStopwatch;
-        blocksHtml += '<div class="fs-block ' + (filled ? 'filled' : '') + ' ' + (current ? 'current' : '') + '"></div>';
-      }
-      return `<div class="fs-clock fs-progress">
-        <div class="fs-time">${timeStr}</div>
-        <div class="fs-blocks">${blocksHtml}</div>
-        <div class="fs-label">${isStopwatch ? 'Stopwatch' : completedBlocks + '/' + blocks + ' blocks (25 min each)'}</div>
-      </div>`;
-      
-    case 'orbit':
-      return `<div class="fs-clock fs-orbit">
-        <svg width="300" height="300" viewBox="0 0 300 300">
-          <circle cx="150" cy="150" r="130" stroke="#262638" stroke-width="4" fill="none" stroke-dasharray="8,8"/>
-          <circle cx="150" cy="150" r="130" stroke="var(--acc)" stroke-width="8" fill="none" stroke-linecap="round" stroke-dasharray="817" stroke-dashoffset="${817 * (1 - progress)}" transform="rotate(-90 150 150)"/>
-          ${!isStopwatch ? '<circle cx="150" cy="150" r="' + (130 - (progress * 50)) + '" stroke="var(--good)" stroke-width="2" fill="none" opacity="0.5"/>' : ''}
-        </svg>
-        <div class="fs-time-orbit">${timeStr}</div>
-        <div class="fs-label">${isStopwatch ? 'Orbit stopwatch' : 'Target: ' + fm(target / 60000)}</div>
-      </div>`;
-      
-    default:
-      return renderClock('digital', elapsed, target, isStopwatch, mins, secs, progress);
-  }
-}
-
-function renderMilestones(mins) {
-  const marks = [
-    [25, 'Clean-run zone: zero distractions = +20 XP'],
-    [50, 'Deep block unlocked (+100 XP). Keep going.'],
-    [90, 'Elite block (+220 XP). You\'re in the zone.'],
-    [120, 'MARATHON. +400 XP bonus locked in.'],
-    [180, 'Ragda Beast territory (+800 XP). Drink water.'],
-    [240, 'LEGEND. +1600 XP. Four hours straight.']
-  ];
-  const hit = marks.filter(m => mins >= m[0]).pop();
-  const next = marks.find(m => mins < m[0]);
-  
-  let html = '<div class="fs-milestone-row">';
-  marks.forEach(([m, label]) => {
-    const reached = mins >= m;
-    const current = !reached && next && m === next[0];
-    html += '<div class="fs-milestone ' + (reached ? 'reached' : '') + ' ' + (current ? 'current' : '') + '"><span class="fs-ms-num">' + m + '\'</span><span class="fs-ms-label">' + label + '</span></div>';
-  });
-  html += '</div>';
-  
-  if (hit) {
-    html += '<div class="fs-milestone-hit"><b>⚡ ' + hit[1] + '</b></div>';
-  }
-  return html;
-}
-
-function fsClockNext() {
-  const idx = FULLSCREEN_CLOCKS.indexOf(fullscreenClockType);
-  fullscreenClockType = FULLSCREEN_CLOCKS[(idx + 1) % FULLSCREEN_CLOCKS.length];
-  renderFullscreenFocus();
-}
-
-function fsClockPrev() {
-  const idx = FULLSCREEN_CLOCKS.indexOf(fullscreenClockType);
-  fullscreenClockType = FULLSCREEN_CLOCKS[(idx - 1 + FULLSCREEN_CLOCKS.length) % FULLSCREEN_CLOCKS.length];
-  renderFullscreenFocus();
-}
-
-function logAndExitFocus() {
-  // Stop the timer and log it
-  api('timer/stop', {}).then(r => {
-    if (r.too_short) {
-      toast('Under 5 minutes — not logged', 'Even 5 counts. Go again.');
-    } else {
-      if (r.capped) toast('Stopwatch capped at 4h', 'Anything past that does not count.');
-      if (r.minutes >= 25) beep();
-    }
-    exitFullscreenFocus();
-    go('today');
-  }).catch(() => {});
-}
-
-/* ---------- pomodoro UI ---------- */
-let pomoConfig = { total: 120, work: 50, brk: 10, long: 15, every: 3 };
-
-function openPomoModal() {
-  modal(`
-    <h2>🍅 Pomodoro Plan</h2>
-    <p class="sm mut">Set your daily focus target. The app breaks it into work/break cycles automatically.</p>
-    <label>Total focus time (minutes)</label>
-    <input id="pomo_total" type="number" inputmode="numeric" value="` + pomoConfig.total + `" min="30" max="720" step="15">
-    <label>Work block length (minutes)</label>
-    <input id="pomo_work" type="number" inputmode="numeric" value="` + pomoConfig.work + `" min="15" max="120" step="5">
-    <label>Short break (minutes)</label>
-    <input id="pomo_brk" type="number" inputmode="numeric" value="` + pomoConfig.brk + `" min="3" max="30" step="1">
-    <label>Long break (minutes)</label>
-    <input id="pomo_long" type="number" inputmode="numeric" value="` + pomoConfig.long + `" min="5" max="60" step="5">
-    <label>Long break every N blocks</label>
-    <input id="pomo_every" type="number" inputmode="numeric" value="` + pomoConfig.every + `" min="2" max="6" step="1">
-    <div class="row" style="margin-top:14px">
-      <button class="btn-p btn-xl grow" data-act="startPomo">Start plan (` + fm(pomoConfig.total) + `)</button>
-    </div>
-    <button class="btn-s" style="margin-top:8px;width:100%" data-act="closeModal">Cancel</button>
-  `);
-  
-  // Update preview when inputs change
-  ['pomo_total', 'pomo_work', 'pomo_brk', 'pomo_long', 'pomo_every'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', updatePomoPreview);
-  });
-}
-
-function updatePomoPreview() {
-  pomoConfig = {
-    total: +val('pomo_total') || 120,
-    work: +val('pomo_work') || 50,
-    brk: +val('pomo_brk') || 10,
-    long: +val('pomo_long') || 15,
-    every: +val('pomo_every') || 3
-  };
-  const plan = pomoPlan(pomoConfig.total, pomoConfig.work);
-  const btn = document.querySelector('[data-act="startPomo"]');
-  if (btn) btn.textContent = 'Start plan (' + fm(pomoConfig.total) + ' · ' + plan.length + ' blocks)';
-}
-
-async function startPomo() {
-  pomoConfig = {
-    total: +val('pomo_total') || 120,
-    work: +val('pomo_work') || 50,
-    brk: +val('pomo_brk') || 10,
-    long: +val('pomo_long') || 15,
-    every: +val('pomo_every') || 3
-  };
-  await api('pomo/start', { subject: S.pickSub, total: pomoConfig.total, work: pomoConfig.work, brk: pomoConfig.brk, long: pomoConfig.long, every: pomoConfig.every });
-  closeModal();
-  await go('today');
-}
-
 /* ---------- admin dashboard (only for RAGDAMAXING_ADMINS) ---------- */
 const fmUp = s => s >= 86400 ? Math.floor(s / 86400) + 'd ' + Math.floor(s % 86400 / 3600) + 'h' : s >= 3600 ? Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm' : Math.floor(s / 60) + 'm';
+const admStat = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
+let adminLastId = null, adminUser = '';
 async function adminOpen() {
   try {
-    const r = await api('admin/stats'), a = r.app, v = r.server;
-    S.lastAdminStats = { r, a, v };
-    const st = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
-    modal(`<h2>🛠️ Server</h2>
-      <div class="sub-tabs" style="margin:8px 0" id="adminTabs">
-        <span class="chip on" data-act="adminTab" data-v="overview">Overview</span>
-        <span class="chip" data-act="adminTab" data-v="activity">Activity Log</span>
-        <span class="chip" data-act="adminTab" data-v="xp">XP Adjust</span>
-        <span class="chip" data-act="adminTab" data-v="moderate">Moderate</span>
-      </div>
-      <div id="adminTabContent"></div>
-      <button class="btn-xl" style="margin-top:8px" data-act="closeModal">Close</button>`);
+    const r = await api('admin/stats'); S.adm = r;
+    modal(`<div class="row between"><h2>Server</h2><button class="btn-s ico" data-act="closeModal" aria-label="Close">${ic('x', 16)}</button></div>
+      <div class="seg mt8" id="adminTabs">${[['overview', 'Overview'], ['activity', 'Activity'], ['xp', 'XP adjust'], ['moderate', 'Moderate']].map(([k, n]) => `<button class="${k === 'overview' ? 'on' : ''}" data-act="adminTab" data-v="${k}">${n}</button>`).join('')}</div>
+      <div id="adminTabContent" class="mt12"></div>`);
     adminShowTab('overview');
   } catch (e) { }
 }
-
 function adminShowTab(tab) {
-  // Update active chip
-  document.querySelectorAll('#adminTabs .chip').forEach(c => {
-    c.classList.toggle('on', c.dataset.v === tab);
-  });
-  const { r, a, v } = S.lastAdminStats || {};
-  const el = $('#adminTabContent');
-  if (!el) return;
+  $$('#adminTabs button').forEach(c => c.classList.toggle('on', c.dataset.v === tab));
+  const r = S.adm, el = $('#adminTabContent'); if (!r || !el) return;
+  const a = r.app, v = r.server;
   if (tab === 'overview') {
-    el.innerHTML = `
-      <div class="grid3" style="margin:10px 0">${st(a.users, 'users')}${st(a.active_today, 'active today')}${st(a.active_7d, 'active 7d')}${st(fm(a.focus_min_today), 'focus today')}${st(a.messages_today, 'msgs today')}${st(a.messages_total, 'msgs total')}</div>
-      <div class="xs mut" style="line-height:1.7">Up ${fmUp(v.uptime_s)} · RAM ${v.rss_mb ?? '?'} MB · load ${v.load.join(' ')} · DB ${v.db_kb} KB · disk free ${v.disk_free_gb}/${v.disk_total_gb} GB · ${v.threads} threads · python ${esc(v.python)} · build ${esc(v.version)} · ${esc(v.time)} ${esc(v.tz)}</div>
-      <h3 style="margin-top:14px">People</h3>${r.users.map(u => `<div class="q"><div class="grow sm"><b>${esc(u.display)}</b> <span class="xs mut">@${esc(u.username)}${u.admin ? ' · admin' : ''}</span><div class="xs mut">${u.xp} XP (grind: ${u.grind}) · last focus ${esc(u.last_focus || 'never')} · ${u.msgs} msgs</div></div><button class="btn-s" data-act="adminReset" data-v="${esc(u.username)}">Reset PIN</button></div>`).join('')}
-      <a class="btn btn-xl c" style="display:block;margin-top:12px;text-decoration:none" href="/api/admin/backup" download>⬇️ Download database backup</a>`;
+    el.innerHTML = `<div class="grid3">${admStat(a.users, 'users')}${admStat(a.active_today, 'active today')}${admStat(a.active_7d, 'active 7d')}${admStat(fm(a.focus_min_today), 'focus today')}${admStat(a.messages_today, 'msgs today')}${admStat(a.messages_total, 'msgs total')}</div>
+      <div class="xs mut mt8" style="line-height:1.7">Up ${fmUp(v.uptime_s)} · RAM ${v.rss_mb ?? '?'} MB · load ${v.load.join(' ')} · DB ${v.db_kb} KB · disk free ${v.disk_free_gb}/${v.disk_total_gb} GB · ${v.threads} threads · python ${esc(v.python)} · build ${esc(v.version)} · ${esc(v.time)} ${esc(v.tz)}</div>
+      <div class="lbl2">People</div>${r.users.map(u => `<div class="q"><div class="grow sm"><b>${esc(u.display)}</b> <span class="xs mut">@${esc(u.username)}${u.admin ? ' · admin' : ''}${u.banned ? ' · blocked' : ''}</span><div class="xs mut">${u.xp} XP (grind ${u.grind}) · last focus ${esc(u.last_focus || 'never')} · ${u.msgs} msgs</div></div><button class="btn-s" data-act="adminReset" data-v="${esc(u.username)}">Reset PIN</button></div>`).join('')}
+      <a class="btn btn-xl c mt12" style="display:block;text-decoration:none" href="/api/admin/backup" download>Download database backup</a>`;
   } else if (tab === 'activity') {
-    adminLoadActivity(1);
+    adminLoadActivity(true);
   } else if (tab === 'xp') {
-    el.innerHTML = `
-      <h3>Add / Remove XP</h3>
-      <p class="sm mut">Positive = add, Negative = subtract. Counts for leaderboard unless "Side XP" checked.</p>
-      <div class="row"><select id="admXpUser" style="flex:1">${r.users.map(u => `<option value="${u.id}">${esc(u.display)} (@${esc(u.username)}) — ${u.xp} XP</option>`).join('')}</select></div>
-      <div class="grid2"><input id="admXpAmt" type="number" placeholder="Amount (e.g. 500 or -200)"><input id="admXpReason" placeholder="Reason"></div>
-      <label class="row" style="align-items:center;gap:8px"><input id="admXpSide" type="checkbox" style="width:auto"> <span>Side XP (doesn't count for leaderboard)</span></label>
-      <div class="row" style="margin-top:8px"><button class="btn-p btn-xl grow" data-act="adminXpSubmit">Apply</button></div>`;
+    el.innerHTML = `<p class="sm mut">Positive adds, negative subtracts. Counts for the leaderboard unless "side XP" is ticked.</p>
+      <select id="admXpUser">${r.users.map(u => `<option value="${u.id}">${esc(u.display)} (@${esc(u.username)}) · ${u.xp} XP</option>`).join('')}</select>
+      <div class="grid2 mt8"><input id="admXpAmt" type="number" placeholder="Amount (500 or -200)"><input id="admXpReason" placeholder="Reason" maxlength="80"></div>
+      <label class="row g8"><input id="admXpSide" type="checkbox" style="width:auto"> <span>Side XP (doesn't count for the leaderboard)</span></label>
+      <button class="btn-p btn-xl mt12" data-act="adminXpSubmit">Apply</button>`;
   } else if (tab === 'moderate') {
-    el.innerHTML = `
-      <h3>Block / Kick Users</h3>
-      <p class="sm mut">Block = cannot log in. Kick = removed from crew (cannot rejoin with same code).</p>
-      ${r.users.filter(u => u.id !== S.user.id && !u.admin).map(u => `
-        <div class="q">
-          <div class="grow sm"><b>${esc(u.display)}</b> <span class="xs mut">@${esc(u.username)}</span>
-            <div class="xs mut">${u.banned ? '<span style="color:var(--bad)">🚫 BLOCKED</span>' : 'Active'} · ${u.crew_id ? 'In crew' : 'No crew'} · ${u.xp} XP</div>
-          </div>
-          <div class="row wrap" style="gap:6px;margin-top:6px">
-            <button class="btn-s ${u.banned ? 'btn-g' : 'btn-d'}" data-act="adminBlock" data-id="${u.id}" data-on="${u.banned ? 0 : 1}">${u.banned ? 'Unblock' : 'Block'}</button>
-            ${u.crew_id ? `<button class="btn-s btn-d" data-act="adminKick" data-id="${u.id}">Kick from crew</button>` : ''}
-          </div>
-        </div>`).join('') || '<div class="mut sm">No other users.</div>'};
-    `;
+    const rows = r.users.filter(u => u.id !== S.user.id && !u.admin);
+    el.innerHTML = `<p class="sm mut">Block means they cannot log in. Kick removes them from the crew.</p>` + (rows.map(u => `<div class="q wrapq"><div class="grow sm"><b>${esc(u.display)}</b> <span class="xs mut">@${esc(u.username)}</span><div class="xs mut">${u.banned ? '<span class="bad">Blocked</span>' : 'Active'} · ${u.crew_id ? 'In crew' : 'No crew'} · ${u.xp} XP</div></div>
+      <div class="row g4"><button class="btn-s ${u.banned ? 'btn-g' : 'btn-d'}" data-act="adminBlock" data-id="${u.id}" data-on="${u.banned ? 0 : 1}">${u.banned ? 'Unblock' : 'Block'}</button>${u.crew_id ? `<button class="btn-s btn-d" data-act="adminKick" data-id="${u.id}">Kick</button>` : ''}</div></div>`).join('') || '<div class="mut sm">No other users.</div>');
   }
 }
-
-let adminActivityPage = 1;
-let adminActivityLastId = null;
-
-async function adminLoadActivity(page = 1, prepend = false) {
-  const el = $('#adminTabContent');
-  if (!el) return;
-  if (page === 1) { adminActivityPage = 1; adminActivityLastId = null; }
+async function adminLoadActivity(reset) {
+  const el = $('#adminTabContent'); if (!el) return;
+  if (reset) {
+    adminLastId = null;
+    el.innerHTML = `<div class="row g8"><select id="actFilterUser"><option value="">Everyone</option>${S.adm.users.map(u => `<option value="${u.id}" ${String(u.id) === adminUser ? 'selected' : ''}>${esc(u.display)}</option>`).join('')}</select></div>
+      <div id="actList" class="mt8"></div><div class="c mt12"><button class="btn-s" id="actMore" data-act="adminActivityMore" disabled>Loading…</button></div>`;
+  }
   try {
-    const r = await api(`admin/activity?limit=100${adminActivityLastId ? '&before=' + adminActivityLastId : ''}`);
-    if (!prepend) {
-      el.innerHTML = `<h3>All XP Activity (newest first)</h3>
-        <div class="xs mut" style="margin-bottom:8px">Source · Grind? · Revoked? · Filter by user: <select id="actFilterUser"><option value="">All</option>${S.crew?.members?.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('') || ''}</select></div>
-        <div id="actList"></div>
-        <div class="c" style="margin-top:12px"><button class="btn-s" data-act="adminActivityMore" disabled>Loading…</button></div>`;
-    }
-    const list = $('#actList');
+    const r = await api(`admin/activity?limit=100${adminUser ? '&user=' + adminUser : ''}${adminLastId ? '&before=' + adminLastId : ''}`);
+    const list = $('#actList'); if (!list) return;
     r.events.forEach(ev => {
-      const revoked = ev.revoked ? ' <span style="color:var(--bad)">⛔ Revoked</span>' : '';
-      const grind = ev.grind ? ' <span style="color:var(--good)">⚡ Grind</span>' : '';
-      const row = `<div class="q" style="flex-wrap:wrap">
-        <div class="grow"><b>${esc(ev.display)}</b> (@${esc(ev.username)})${grind}${revoked}
-          <div class="xs mut">${ev.day} ${ev.ts.slice(11,19)} · <span style="color:var(--acc2)">${ev.src}</span> · ${ev.amount > 0 ? '+' : ''}${ev.amount} XP · ${esc(ev.label)}</div>
-        </div>
-        ${!ev.revoked && !ev.key.startsWith('admin:') && !ev.key.startsWith('adm0:') ? `<button class="btn-s btn-d" data-act="adminRevoke" data-id="${ev.id}">Revoke</button>` : ''}
-      </div>`;
-      list.insertAdjacentHTML('beforeend', row);
-      adminActivityLastId = ev.id;
+      list.insertAdjacentHTML('beforeend', `<div class="q wrapq"><div class="grow sm"><b>${esc(ev.display)}</b> <span class="xs mut">@${esc(ev.username)}</span>${ev.grind ? ' <span class="pill g">grind</span>' : ''}${ev.revoked ? ' <span class="pill d">revoked</span>' : ''}
+        <div class="xs mut">${esc(ev.day)} ${esc(ev.ts.slice(11, 19))} · ${esc(ev.src)} · ${ev.amount > 0 ? '+' : ''}${ev.amount} XP · ${esc(ev.label)}</div></div>
+        ${!ev.revoked && !ev.key.startsWith('admin:') && !ev.key.startsWith('adm0:') ? `<button class="btn-s btn-d" data-act="adminRevoke" data-id="${ev.id}">Revoke</button>` : ''}</div>`);
+      adminLastId = ev.id;
     });
-    const btn = document.querySelector('[data-act="adminActivityMore"]');
-    if (btn) {
-      btn.disabled = !r.more;
-      btn.textContent = r.more ? 'Load more…' : 'End';
-    }
+    const btn = $('#actMore'); if (btn) { btn.disabled = !r.more; btn.textContent = r.more ? 'Load more' : 'End of log'; }
   } catch (e) { }
 }
-
 Object.assign(A, {
   adminTab(el) { adminShowTab(el.dataset.v); },
-  async adminActivityMore() { adminLoadActivity(adminActivityPage + 1, true); },
+  adminActivityMore() { return adminLoadActivity(false); },
   async adminXpSubmit() {
-    const uid = +$('#admXpUser').value, amt = +$('#admXpAmt').value, reason = $('#admXpReason').value, side = $('#admXpSide').checked;
-    if (!amt) return toast('Enter amount');
-    try { await api('admin/xp', { id: uid, amount: amt, reason, side }); toast('XP adjusted'); adminLoadActivity(1); } catch (e) {}
+    const uid = +val('admXpUser'), amt = +val('admXpAmt'), reason = val('admXpReason'), side = $('#admXpSide').checked;
+    if (!amt) return toast('Enter an amount');
+    await api('admin/xp', { id: uid, amount: amt, reason, side }); toast('XP adjusted'); S.adm = await api('admin/stats'); adminShowTab('activity');
   },
-  async adminBlock(el) { const id = +el.dataset.id, on = +el.dataset.on; try { await api('admin/block', { id, blocked: !!on }); toast(on ? 'Blocked' : 'Unblocked'); adminOpen(); } catch (e) {} },
-  async adminKick(el) { const id = +el.dataset.id; if (!confirm('Kick from crew? They cannot rejoin with the same code.')) return; try { await api('admin/kick', { id }); toast('Kicked'); adminOpen(); } catch (e) {} },
-  async adminRevoke(el) { const id = +el.dataset.id; if (!confirm('Revoke this XP event? Adds a negative entry to undo it.')) return; try { await api('admin/revoke', { id }); toast('Revoked'); adminLoadActivity(1); } catch (e) {} },
+  async adminBlock(el) { await api('admin/block', { id: +el.dataset.id, blocked: !!+el.dataset.on }); toast(+el.dataset.on ? 'Blocked' : 'Unblocked'); S.adm = await api('admin/stats'); adminShowTab('moderate'); },
+  async adminKick(el) { if (!confirm('Kick from crew? They cannot rejoin with the same code.')) return; await api('admin/kick', { id: +el.dataset.id }); toast('Kicked'); S.adm = await api('admin/stats'); adminShowTab('moderate'); },
+  async adminRevoke(el) { if (!confirm('Revoke this XP event? This adds a negative entry to undo it.')) return; await api('admin/revoke', { id: +el.dataset.id }); toast('Revoked'); adminLoadActivity(true); },
 });
+document.addEventListener('change', e => { if (e.target.id === 'actFilterUser') { adminUser = e.target.value; adminLoadActivity(true); } });
 
-/* ---------- live presence: poll, notify when friends start ---------- */
+/* ---------- live presence: refresh the visible tab without ever interrupting you ---------- */
 let seenLive = new Set();
 setInterval(async () => {
-  if (!S.user || document.hidden) return;
-  const ae = document.activeElement; const typing = ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName);
+  if (!S.user || document.hidden || S.fs) return;
+  const ae = document.activeElement, typing = ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName);
+  if (typing || S.urge || modalOpen() || Date.now() - S.lastPtr < 2500) return;
   try {
-    if (S.tab === 'today' && !typing && !S.urge && $('#modal').classList.contains('hidden')) {
-      const t = await api('today'); const wasTimer = !!S.today?.timer; S.today = t;
+    if (S.tab === 'today') {
+      const t = await api('today'), running = !!(S.today?.timer || S.today?.pomo);
+      setToday(t);
       t.live.forEach(l => { const k = l.display + l.subject; if (!seenLive.has(k) && 'Notification' in window && Notification.permission === 'granted') new Notification(`${l.display} is locked in on ${l.subject}`, { body: 'Join them. Start a block.' }); seenLive.add(k); });
-      if (!(wasTimer && t.timer)) render(); else { const lv = $('.live-strip'); }
-    } else if (S.tab === 'crew' && !typing) { S.crew = await api('crew'); render(); }
+      if (!(running && (t.timer || t.pomo))) render();
+    } else if (S.tab === 'crew') { S.crew = await api('crew'); render(); }
   } catch (e) { }
 }, 25000);
 

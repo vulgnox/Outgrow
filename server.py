@@ -67,7 +67,9 @@ XP_PER_MIN = 2   # verified timer minute (manual log = half)
 SESSION_MILESTONES = [(25, 40, "Milestone: 25 min block"), (50, 100, "Milestone: 50 min deep block"),
                       (90, 220, "Milestone: 90 min elite block"), (120, 400, "Marathon bonus: 2h+ in one sitting"),
                       (180, 800, "Milestone: 3h beast mode"), (240, 1600, "Milestone: 4h legend")]
-DAY_MILESTONES = [(60, 50), (120, 120), (240, 300), (360, 600), (480, 1200)]  # verified minutes in one day
+DAY_MILESTONES = [(60, 50), (120, 120), (240, 300), (360, 600), (480, 1200), (600, 1500), (720, 2500)]  # verified minutes in one day
+LEVEL_K = 190   # level = floor(sqrt(xp / LEVEL_K)) + 1. Lv 100 = 1.86M XP = the 16h/day ceiling over ~150 days
+HB_GRACE = 10 * 60   # seconds. A running block must 'check in' (any request from the open app counts); longer silences are not credited
 SIDE_CAP = 200   # max XP/day from study section / plans / habits / quests etc.
 GRIND_PREFIXES = ("focus:", "deep:", "marathon:", "clean:", "ms:", "dm:", "admin:")
 SIDE_PREFIXES = ("chap:", "rev:", "test:", "plan:", "urge:", "nudge:", "habit:", "reflect:", "quest:", "sweep:", "chest:", "weekly:")
@@ -87,14 +89,10 @@ def grind(conn, uid, d1=None, d2=None):
         a.append(d2)
     return conn.execute(sql, a).fetchone()[0]
 
-# (level, title, emoji). Same XP curve as before, only the names changed (and there are way more of them).
-RANKS = [(1, "Lazy Larva", "🐛"), (2, "Snooze Slayer", "⏰"), (3, "Rag Rookie", "🧽"), (4, "Desk Goblin", "👺"),
-         (5, "Chapter Cannibal", "🍖"), (6, "Caffeine Demon", "☕"), (8, "Midnight Menace", "🌑"),
-         (10, "Syllabus Slaughterer", "🪓"), (12, "Formula Fiend", "🧪"), (14, "Brain Reactor", "☢️"),
-         (16, "PYQ Predator", "🦖"), (18, "Topper Terminator", "🤖"), (20, "Ragda Overlord", "👹"),
-         (23, "Cerebral Warlord", "⚔️"), (26, "Rank Reaper", "💀"), (30, "Ragdamaxxer", "🗿"),
-         (35, "Gigabrain Gladiator", "🧠"), (40, "Eldritch Grinder", "🐙"), (46, "AIR 1 Apparition", "👻"),
-         (55, "RAGDAMAXED GOD", "⚡")]
+# (level, title, emoji). Calibrated to the XP curve: the top title needs the ~16h/day ceiling, realistic apex is Phantom (~10h/day).
+RANKS = [(1, "Sleepwalker", "😴"), (5, "Spark", "✨"), (12, "Grinder", "⚙️"), (20, "Locked In", "🔒"),
+         (28, "Iron Habit", "🔩"), (35, "Night Blade", "🗡️"), (42, "Warlord", "⚔️"), (53, "Rank Reaper", "💀"),
+         (66, "Apex", "🔺"), (78, "Phantom", "👻"), (92, "Titan", "🗿"), (100, "RAGDAMAXED", "⚡")]
 
 SYLLABUS = {
     "Physics": {
@@ -249,12 +247,12 @@ def total_xp(conn, uid):
 
 
 def level_of(xp):
-    return int(math.sqrt(max(xp, 0) / 60)) + 1
+    return int(math.sqrt(max(xp, 0) / LEVEL_K)) + 1
 
 
 def level_info(xp):
     L = level_of(xp)
-    lo, hi = 60 * (L - 1) ** 2, 60 * L ** 2
+    lo, hi = LEVEL_K * (L - 1) ** 2, LEVEL_K * L ** 2
     idx = max(i for i, r in enumerate(RANKS) if L >= r[0])
     nxt = RANKS[idx + 1] if idx + 1 < len(RANKS) else None
     return {"level": L, "rank": RANKS[idx][1], "emoji": RANKS[idx][2], "xp": xp, "lo": lo, "hi": hi,
@@ -1014,6 +1012,22 @@ def timer_distract(c):
     return {"ok": True}
 
 
+def hb_touch(conn, uid):
+    """Heartbeat: any request from the open app while a block runs counts as a check-in. Silence longer than
+    HB_GRACE (tab closed, phone locked, app killed) is booked as 'away' time and is not credited."""
+    r = q1(conn, "SELECT started, last_ping, away FROM timers WHERE user_id=?", (uid,))
+    if not r:
+        return
+    t = time.time()
+    gap = t - (r["last_ping"] or r["started"])
+    conn.execute("UPDATE timers SET last_ping=?, away=? WHERE user_id=?", (t, (r["away"] or 0) + (gap if gap > HB_GRACE else 0), uid))
+
+
+@route("POST", "/api/timer/ping")
+def timer_ping(c):
+    return {"ok": True}  # the check-in itself happens in dispatch
+
+
 @route("POST", "/api/timer/stop")
 def timer_stop(c):
     t = q1(c.conn, "SELECT * FROM timers WHERE user_id=?", (c.user["id"],))
@@ -1023,7 +1037,9 @@ def timer_stop(c):
     c.conn.execute("DELETE FROM pomo WHERE user_id=?", (c.user["id"],))  # stopping mid-pomodoro ends the whole plan
     if c.body.get("discard"):
         return {"ok": True, "discarded": True}
-    elapsed = (time.time() - t["started"]) / 60.0
+    gap = time.time() - (t.get("last_ping") or t["started"])
+    away = (t.get("away") or 0) + (gap if gap > HB_GRACE else 0)
+    elapsed = max((time.time() - t["started"] - away) / 60.0, 0)
     stopwatch = (t.get("mode") or "timer") == "stopwatch"
     if stopwatch:
         minutes = int(min(elapsed, STOPWATCH_CAP))  # open-ended, but capped so a forgotten stopwatch can't farm XP
@@ -1035,6 +1051,8 @@ def timer_stop(c):
     res = log_focus(c, t["subject"], minutes, "timer", t["distractions"], note, dt.datetime.fromtimestamp(t["started"]))
     if stopwatch and elapsed > STOPWATCH_CAP:
         res["capped"] = STOPWATCH_CAP
+    if away >= 120:
+        res["away"] = int(away // 60)
     return res
 
 
@@ -1699,7 +1717,7 @@ def api_insights(c):
     urg = q(c.conn, "SELECT trigger, COUNT(*) n FROM urges WHERE user_id=? AND trigger<>'' GROUP BY trigger ORDER BY n DESC LIMIT 4", (uid,))
     badges = {r["id"]: r["day"] for r in q(c.conn, "SELECT id, day FROM badges WHERE user_id=?", (uid,))}
     qdays = sum(1 for h in heat if h["q"])
-    return {"ladder": [{"level": l, "rank": n, "emoji": e} for l, n, e in RANKS], "heat": heat, "hours": hours, "weeks": weeks, "ghost": ghost, "cum": cum, "outgrow": {"ratio": round(ratio, 2), "last7": last7, "baseline_h": u["baseline_h"]},
+    return {"ladder": [{"level": l, "rank": n, "emoji": e, "xp": LEVEL_K * (l - 1) ** 2} for l, n, e in RANKS], "heat": heat, "hours": hours, "weeks": weeks, "ghost": ghost, "cum": cum, "outgrow": {"ratio": round(ratio, 2), "last7": last7, "baseline_h": u["baseline_h"]},
             "sub7": sub7, "chapters": {"total": ch["n"], "learned": ch["l"] or 0, "mastered": ch["mst"] or 0, "rate": rate, "left": left},
             "exams": exams, "mood": list(reversed(mood)), "urge_triggers": urg,
             "evidence": {"hours": round(s["minutes"] / 60, 1), "sessions": s["sessions"], "deep": s["deep"], "longest": max(u["longest"], u["run"]),
@@ -2283,6 +2301,8 @@ class Handler(BaseHTTPRequestHandler):
             before = level_of(total_xp(conn, user["id"])) if user and method == "POST" else None
             before_rank = level_info(total_xp(conn, user["id"]))["rank"] if before is not None else None
             res = fn(c)
+            if user:
+                hb_touch(conn, user["id"])
             if before is not None and c.user:
                 after = level_of(total_xp(conn, c.user["id"]))
                 if after > before:
@@ -2337,9 +2357,13 @@ def migrate(conn):
                             ("messages", "reply_to", "INTEGER"),
                             ("messages", "edited", "INTEGER DEFAULT 0"),
                             ("users", "banned", "INTEGER DEFAULT 0"),
-                            ("users", "prev_crew", "INTEGER")):
+                            ("users", "prev_crew", "INTEGER"),
+                            ("timers", "last_ping", "REAL"),
+                            ("timers", "away", "REAL DEFAULT 0")):
         if col not in cols(table):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+            if col == "last_ping":
+                conn.execute("UPDATE timers SET last_ping=?", (time.time(),))  # blocks already running at deploy time are not penalised
     if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
         # v1: the boss used to be resolved (and failed) the moment a day began, so every stored failure is bogus
         conn.execute("DELETE FROM boss_battles WHERE passed=0")

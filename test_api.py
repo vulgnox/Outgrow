@@ -194,7 +194,7 @@ try:
     check("register e", e.call("POST", "/api/register", {"username": "ragda1", "pin": "1111", "crew_code": code})[0] == 200)
     check("register f", f.call("POST", "/api/register", {"username": "ragda2", "pin": "2222", "crew_code": code})[0] == 200)
     r = f.call("GET", "/api/today")[1]
-    check("starter title", r["level"]["rank"] == "Lazy Larva" and r["level"]["next_rank"] == "Snooze Slayer" and r["level"]["emoji"], r["level"])
+    check("starter title", r["level"]["rank"] == "Sleepwalker" and r["level"]["next_rank"] == "Spark" and r["level"]["emoji"], r["level"])
     check("bad timer mode rejected", f.call("POST", "/api/timer/start", {"subject": "Maths", "mode": "banana"})[0] == 400)
     s, r = e.call("POST", "/api/timer/start", {"subject": "Physics", "mode": "stopwatch"})
     check("stopwatch start", s == 200, r)
@@ -241,6 +241,26 @@ try:
     check("edit rejects empty", e.call("POST", "/api/chat/edit", {"id": m1, "text": "   "})[0] == 400)
     db.execute("UPDATE messages SET ts='2000-01-01T00:00:00' WHERE id=?", (m1,)); db.commit()
     check("edit window enforced", e.call("POST", "/api/chat/edit", {"id": m1, "text": "late"})[0] == 400)
+
+    # heartbeat: walking away from a running block must not pay
+    uid_e = "(SELECT id FROM users WHERE username='ragda1')"
+    e.call("POST", "/api/timer/start", {"subject": "Maths", "mode": "stopwatch"})
+    db.execute(f"UPDATE timers SET started=started-7200, last_ping=last_ping-7200 WHERE user_id={uid_e}"); db.commit()
+    s, r = e.call("POST", "/api/timer/stop", {})
+    check("walk-away block earns nothing", s == 200 and r.get("too_short") is True, r)
+    e.call("POST", "/api/timer/start", {"subject": "Maths", "mode": "stopwatch"})
+    db.execute(f"UPDATE timers SET started=started-7200, last_ping=last_ping-3600 WHERE user_id={uid_e}"); db.commit()
+    check("ping endpoint ok", e.call("POST", "/api/timer/ping", {})[0] == 200)  # gap of 1h is booked as away
+    db.execute(f"UPDATE timers SET started=started-1800, last_ping=last_ping-1800 WHERE user_id={uid_e}"); db.commit()
+    s, r = e.call("POST", "/api/timer/stop", {})
+    check("away gap is not credited, rest is", s == 200 and 30 <= r["minutes"] <= 70 and r.get("away", 0) >= 50, r)
+    e.call("POST", "/api/timer/start", {"subject": "Maths", "mode": "stopwatch"})
+    db.execute(f"UPDATE timers SET started=started-3000, last_ping=last_ping-120 WHERE user_id={uid_e}"); db.commit()
+    s, r = e.call("POST", "/api/timer/stop", {})
+    check("small gaps are forgiven", s == 200 and r["minutes"] in (49, 50) and "away" not in r, r)
+    s, r = e.call("GET", "/api/me")
+    li = f.call("GET", "/api/today")[1]["level"]
+    check("level curve k=190", li["hi"] == 190 and li["lo"] == 0, li)
 
     # admin
     s, r = a.call("GET", "/api/admin/stats"); check("admin stats", s == 200 and r["app"]["users"] >= 4 and "rss_mb" in r["server"] and r["app"]["messages_total"] > 0, r)

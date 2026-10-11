@@ -288,7 +288,7 @@ async function finishTimer(body) {
   const r = await api('timer/stop', body || {});
   if (r.discarded) { /* nothing to log */ }
   else if (r.too_short) toast('Under 5 minutes, not logged', 'Even 5 counts. Go again.');
-  else { if (r.capped) toast('Stopwatch capped at 4h', 'Time past that does not count.'); if (r.minutes >= 25) beep(); }
+  else { if (r.capped) toast('Stopwatch capped at 4h', 'Time past that does not count.'); if (r.away) toast(`${r.away} min not counted`, 'The app was closed or the screen was off. Keep it open during a block.'); if (r.minutes >= 25) beep(); }
   S.beepKey = null;
   try { setToday(await api('today')); } catch (e) { }
   exitFullscreenFocus(true);
@@ -300,7 +300,7 @@ async function finishTimer(body) {
 const FS_CLOCKS = [['digital', 'Digital'], ['analog', 'Dial'], ['minimal', 'Minimal'], ['progress', 'Blocks'], ['orbit', 'Orbit']];
 let fsWake = null;
 async function requestWakeLock() {
-  try { if ('wakeLock' in navigator && !fsWake && S.fs) { fsWake = await navigator.wakeLock.request('screen'); fsWake.addEventListener('release', () => { fsWake = null; }); } } catch (e) { fsWake = null; }
+  try { if ('wakeLock' in navigator && !fsWake && (S.fs || S.today?.timer)) { fsWake = await navigator.wakeLock.request('screen'); fsWake.addEventListener('release', () => { fsWake = null; }); } } catch (e) { fsWake = null; }
 }
 function releaseWakeLock() { try { if (fsWake) fsWake.release().catch(() => { }); } catch (e) { } fsWake = null; }
 
@@ -616,7 +616,7 @@ function vMe() {
   const hrmx = Math.max(...I.hours, 1), best = I.hours.indexOf(Math.max(...I.hours));
   let h = `<section class="card hero"><div class="row g12">${avatar(u.emoji, u.color, 'xl')}<div class="grow"><h2>${esc(u.display)}</h2><div class="mut sm">Level ${L.level} · ${esc(L.emoji)} ${esc(L.rank)} · ${L.xp.toLocaleString()} XP</div></div></div>
     <div class="bar xp mt12"><i style="width:${L.pct}%"></i></div>
-    <details data-k="ladder"><summary>Title ladder · ${I.ladder.length} titles · ${L.next_rank ? 'next: ' + esc(L.next_emoji) + ' ' + esc(L.next_rank) + ' at Lv ' + L.next_at : 'top title reached'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .4}"><span class="lad-e">${esc(r.emoji)}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">you</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(60 * (r.level - 1) ** 2).toLocaleString()} XP</span></div>`).join('')}</details></section>`;
+    <details data-k="ladder"><summary>Title ladder · ${I.ladder.length} titles · ${L.next_rank ? 'next: ' + esc(L.next_emoji) + ' ' + esc(L.next_rank) + ' at Lv ' + L.next_at : 'top title reached'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .4}"><span class="lad-e">${esc(r.emoji)}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">you</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(r.xp || 0).toLocaleString()} XP</span></div>`).join('')}</details></section>`;
   h += `<section class="card">${lbl('The Ragda meter')}<p class="sm mut">Your last 7 days against the old A+ you (${og.baseline_h}h a day).</p><div class="row between"><div class="bignum" style="color:${pct >= 100 ? 'var(--good)' : 'var(--tx)'}">${pct}%</div><div class="sm rt-text">${pct >= 130 ? 'You are Ragdamaxed. The old you cannot keep up.' : pct >= 100 ? 'You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
     <div class="bar mt8 ${pct >= 100 ? 'g' : ''}"><i style="width:${Math.min(pct, 100)}%"></i></div>
     ${I.ghost ? `<div class="lbl2">You vs your best week</div>${lines([{ v: I.ghost.cum, c: '#7c7c88', d: 1, w: 2 }, { v: I.cum, c: '#3dd6a0', w: 3 }])}<div class="xs mut">Dashed is your best week (${fm(I.ghost.total)}). Green is this week.</div>` : ''}</section>`;
@@ -777,9 +777,13 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && S.fs && S.fsNative) { exitFullscreenFocus(); } });
+/* heartbeat: while a block runs the app checks in silently every 50 s. No taps, no popups, zero attention cost. */
+function hbPing() { if (S.user && S.today && S.today.timer) fetch('/api/timer/ping', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', keepalive: true }).catch(() => { }); }
+setInterval(hbPing, 50000);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !S.user) return;
-  if (S.fs) requestWakeLock();
+  hbPing();
+  if (S.fs || S.today?.timer) requestWakeLock();
   if (S.tab === 'today' && S.today && (S.today.timer || S.today.pomo)) { syncToday(); tickOnce(); }
 });
 /* ---------- CHAT: text only. Crew room + private DMs ---------- */

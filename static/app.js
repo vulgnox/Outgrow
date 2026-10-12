@@ -182,7 +182,7 @@ async function loadTab(tab) {
     const [syl, te] = await Promise.all([api('syllabus'), api('tests')]); S.syl = syl; S.tests = te;
     if (!S.ins) S.ins = await api('insights');
   }
-  else if (tab === 'reflect') { const [r, w] = await Promise.all([api('reflect'), api('weekly')]); S.refl = r; S.weekly = w; }
+  else if (tab === 'reflect') { const [r, w, rp] = await Promise.all([api('reflect'), api('weekly'), api('report')]); S.refl = r; S.weekly = w; S.report = rp; S.reportView = 'last'; }
   else if (tab === 'me') { const [ins, gr] = await Promise.all([api('insights'), api('growth')]); S.ins = ins; S.growth = gr; }
   else if (tab === 'chat') await chatLoadThreads();
 }
@@ -616,10 +616,29 @@ function vStudy() {
 }
 
 /* ---------- REFLECT ---------- */
+function vReport() {
+  const P = S.report; if (!P) return '';
+  const dm = P.minutes - P.prev_minutes, sg = v => (v >= 0 ? '+' : '-'), L = P.league;
+  const wd = P.best_day ? new Date(P.best_day + 'T00:00').toLocaleDateString(undefined, { weekday: 'short' }) : '–';
+  const moved = L ? L.prev_rank - L.rank : 0;
+  const st = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
+  const subs = Object.entries(P.by_subject).sort((a, b) => b[1] - a[1]);
+  const T = P.tests;
+  return `<section class="card hero">${lbl('Weekly report', `Week of ${esc(P.week)}`)}
+    ${seg([['last', 'Last week'], ['cur', 'This week so far']], S.reportView || 'last', 'reportWeek')}
+    <div class="row between mt8"><div class="big num">${fm(P.minutes)}</div><div class="sm" style="text-align:right">${P.prev_minutes ? `<b class="${dm >= 0 ? 'good' : ''}">${sg(dm)}${fm(Math.abs(dm))}</b> vs the week before` : 'First tracked week'}</div></div>
+    <div class="grid3 mt8">${st(`${P.floor_days}/7`, 'floor days')}${st(`${wd} ${fm(P.best_day_minutes)}`, 'best day')}${st(fm(P.longest_block), 'longest block')}</div>
+    <div class="grid3 mt8">${st(`${P.xp.toLocaleString()}`, `XP (${sg(P.xp - P.prev_xp)}${Math.abs(P.xp - P.prev_xp).toLocaleString()})`)}${st(L ? `#${L.rank} of ${L.of}${moved ? (moved > 0 ? ' ▲' + moved : ' ▼' + Math.abs(moved)) : ''}` : '–', 'league')}${st(P.promises.pct == null ? '–' : P.promises.pct + '%', `promises kept (${P.promises.done}/${P.promises.made})`)}</div>
+    ${subs.length ? `<div class="chips mt8">${subs.map(([k, v]) => `<span class="pill" style="background:${SCOL[k] || '#9aa0b4'}33;color:${SCOL[k] || '#9aa0b4'}">${esc(k)} ${fm(v)}</span>`).join('')}</div>` : ''}
+    <div class="sm mt8">${P.chapters} chapter${P.chapters === 1 ? '' : 's'} learned · ${P.revisions} revision${P.revisions === 1 ? '' : 's'} cleared${T.n ? ` · ${T.n} test${T.n === 1 ? '' : 's'} at ${T.avg}%${T.prev_avg != null ? ` (${sg(T.avg - T.prev_avg)}${Math.abs(T.avg - T.prev_avg)} vs before)` : ''}` : ''}${P.think != null ? ` · median start ${fsec(P.think)}` : ''}</div>
+    ${L && L.above ? `<div class="sm mut mt4">${L.gap} XP from passing ${esc(L.above)} at the week's end.</div>` : ''}
+    <div class="quote">${esc(P.insight)}</div>
+    ${P.is_current ? '<div class="xs mut">Weeks can be shared to the crew feed once they are finished.</div>' : `<button class="btn-xl mt8" data-act="shareReport" data-v="${esc(P.week)}" ${P.shared ? 'disabled' : ''}>${P.shared ? 'Shared to the crew feed' : 'Share to the crew feed'}</button>`}</section>`;
+}
 function vReflect() {
   const R = S.refl, W = S.weekly, t = R.today, miss = R.minutes < R.daily_min;
   const scale = (id, v, lo, hi) => `<div class="scale" id="${id}">${[1, 2, 3, 4, 5].map(i => `<span class="${(v || 3) === i ? 'on' : ''}" data-act="mood" data-g="${id}" data-v="${i}">${i}</span>`).join('')}</div><div class="row between xs mut mt4"><span>${lo}</span><span>${hi}</span></div>`;
-  let h = `<section class="card hero"><h2>Tonight's reflection</h2><p class="sm mut">60 seconds. Not a diary, a debugging session. ${t ? '<b class="good">Done for today. You can still edit it.</b>' : '+40 XP'}</p>
+  let h = vReport() + `<section class="card hero"><h2>Tonight's reflection</h2><p class="sm mut">60 seconds. Not a diary, a debugging session. ${t ? '<b class="good">Done for today. You can still edit it.</b>' : '+40 XP'}</p>
     <label>Mood</label>${scale('f_mood', t?.mood, 'Low', 'High')}<label>Energy</label>${scale('f_energy', t?.energy, 'Drained', 'Charged')}
     <label>One specific win today (small counts: "did 12 integration problems")</label><textarea id="f_win">${esc(t?.win || '')}</textarea>
     <label>Where did time leak, and what triggered it? (describe, don't judge)</label><textarea id="f_leak">${esc(t?.leak || '')}</textarea>
@@ -728,6 +747,8 @@ const A = {
   pickDur(el) { S.pickDur = +el.dataset.v; PREF.set('dur', S.pickDur); render(); },
   pickMode(el) { S.pickMode = el.dataset.v; PREF.set('mode', S.pickMode); render(); },
   crewPeriod(el) { S.crewPeriod = el.dataset.v; render(); },
+  async reportWeek(el) { S.reportView = el.dataset.v; S.report = await api(el.dataset.v === 'cur' ? 'report?week=' + S.report.this_week : 'report'); render(); },
+  async shareReport(el) { await api('report/share', { week: el.dataset.v }); toast('Shared to the crew feed'); S.report = await api('report?week=' + el.dataset.v); render(); },
   async startTimer() { thinkToast(await api('timer/start', { subject: S.pickSub, target: S.pickDur, mode: S.pickMode === 'stopwatch' ? 'stopwatch' : 'timer' })); await refresh(); },
   async start5() { thinkToast(await api('timer/start', { subject: S.pickSub, target: 5 })); await refresh(); },
   async startPomo() {

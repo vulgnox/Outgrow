@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS chests(user_id INTEGER, day TEXT, reward TEXT, PRIMAR
 CREATE TABLE IF NOT EXISTS crew_rank(crew_id INTEGER PRIMARY KEY, week TEXT, order_ids TEXT);
 CREATE TABLE IF NOT EXISTS app_opens(id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, opened_at REAL, started_at REAL, think_s INTEGER);
 CREATE INDEX IF NOT EXISTS ix_opens ON app_opens(user_id, day);
+CREATE TABLE IF NOT EXISTS report_shares(user_id INTEGER, week TEXT, PRIMARY KEY(user_id, week));
 CREATE TABLE IF NOT EXISTS badges(user_id INTEGER, id TEXT, day TEXT, PRIMARY KEY(user_id, id));
 CREATE TABLE IF NOT EXISTS legacy(username TEXT, day TEXT, done INTEGER, total INTEGER);
 CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, thread TEXT NOT NULL, sender INTEGER NOT NULL, recip INTEGER, ts TEXT, body TEXT, deleted INTEGER DEFAULT 0);
@@ -1015,7 +1016,7 @@ def api_today(c):
     if not sv["qualified"] and u["comeback"]:
         banners.append({"kind": "twice", "text": "You missed a day. That's human. Missing TWO is a pattern. Hit your floor today and collect a +100 XP Redemption bonus."})
     if t.weekday() == 0:
-        banners.append({"kind": "fresh", "text": "🆕 New week. League reset. Everyone starts from zero — including the person ahead of you."})
+        banners.append({"kind": "fresh", "text": "🆕 New week. League reset. Everyone starts from zero — including the person ahead of you. Your weekly report is ready in the Reflect tab."})
     live = []
     if u["crew_id"]:
         live = q(c.conn, """SELECT us.display, us.emoji, tm.subject, tm.started, tm.mode FROM timers tm JOIN users us ON us.id=tm.user_id
@@ -1647,6 +1648,121 @@ def api_crew(c):
     return {"crew": {"name": crew["name"], "code": crew["code"], "goal_h": crew["goal_h"]}, "members": out, "rival": rival,
             "team": {"minutes": sum(m["week_min"] for m in out), "goal": int(goal_min)}, "feed": fd, "duels": duels, "me": u["id"], "hall": hall, "records": records,
             "boss": boss_status, "crown": crown_holder}
+
+
+def fmin(m):
+    m = int(m or 0)
+    return f"{m // 60}h{m % 60:02d}m" if m >= 60 else f"{m}m"
+
+
+def report_insight(r):
+    """One honest, data-driven line. First rule that applies wins."""
+    tot = r["minutes"]
+    if tot < 60:
+        return "Barely any focus logged this week. A fresh week starts Monday: pick one block and start it within two minutes of opening the app."
+    core = {k: r["by_subject"].get(k, 0) for k in CORE}
+    low = min(core, key=core.get)
+    if tot >= 300 and core[low] / tot < 0.10:
+        return f"{low} got only {round(core[low] / tot * 100)}% of your time. That is your weakest link; give it the first block of the day."
+    pm = r["prev_minutes"]
+    if pm and tot >= pm * 1.2:
+        return f"Up {round((tot / pm - 1) * 100)}% on the week before. Whatever you changed, keep it."
+    if pm and tot <= pm * 0.8:
+        return f"Down {round((1 - tot / pm) * 100)}% on the week before." + (f" Your best day ({r['best_day']}) shows what you can do; copy that day." if r["best_day"] else "")
+    if r["peak_hour"] is not None:
+        h = r["peak_hour"]
+        return f"Most of your verified focus landed around {h % 12 or 12}{'am' if h < 12 else 'pm'}. Put your hardest chapter in that window."
+    return "Steady week. Consistency is the whole game; do it again."
+
+
+def week_report(conn, u, ws):
+    uid, we, pws = u["id"], ws + D(6), ws - D(7)
+    a, b, pa, pb = iso(ws), iso(we), iso(pws), iso(ws - D(1))
+    st = day_stats(conn, uid, pws, we)
+    cur = {d: v for d, v in st.items() if a <= d <= b}
+    prv = {d: v for d, v in st.items() if pa <= d <= pb}
+    mins, pmins = sum(v["total"] for v in cur.values()), sum(v["total"] for v in prv.values())
+    by_sub = {}
+    for v in cur.values():
+        for k, m in v["sub"].items():
+            by_sub[k] = by_sub.get(k, 0) + m
+    bd = max(cur.items(), key=lambda kv: kv[1]["total"], default=(None, None))
+    one = lambda sql, *x: conn.execute(sql, (uid,) + x).fetchone()[0]
+    peak = conn.execute("SELECT hour FROM focus WHERE user_id=? AND kind='timer' AND day BETWEEN ? AND ? GROUP BY hour ORDER BY SUM(minutes) DESC LIMIT 1", (uid, a, b)).fetchone()
+    tests = lambda x, y: [r[0] for r in conn.execute("SELECT score*100.0/maxscore FROM tests WHERE user_id=? AND day BETWEEN ? AND ?", (uid, x, y)).fetchall()]
+    tn, tp = tests(a, b), tests(pa, pb)
+    made, done = conn.execute("SELECT COUNT(*), COALESCE(SUM(done),0) FROM plans WHERE user_id=? AND day BETWEEN ? AND ?", (uid, a, b)).fetchone()
+    think = median([r[0] for r in conn.execute("SELECT think_s FROM app_opens WHERE user_id=? AND started_at IS NOT NULL AND day BETWEEN ? AND ?", (uid, a, b)).fetchall()])
+    pthink = median([r[0] for r in conn.execute("SELECT think_s FROM app_opens WHERE user_id=? AND started_at IS NOT NULL AND day BETWEEN ? AND ?", (uid, pa, pb)).fetchall()])
+    league = None
+    if u["crew_id"]:
+        mem = [m["id"] for m in q(conn, "SELECT id FROM users WHERE crew_id=? ORDER BY id", (u["crew_id"],))]
+        if len(mem) >= 2:
+            def rank_for(x, y):
+                xp = {m: grind(conn, m, x, y) for m in mem}
+                order = sorted(mem, key=lambda m: (-xp[m], m))
+                i = order.index(uid)
+                return i + 1, xp[uid], (xp[order[i - 1]] - xp[uid] if i > 0 else None), (order[i - 1] if i > 0 else None)
+            r1, x1, gap, above = rank_for(a, b)
+            r0 = rank_for(pa, pb)[0]
+            nm = q1(conn, "SELECT display FROM users WHERE id=?", (above,))["display"] if above else None
+            league = {"rank": r1, "of": len(mem), "prev_rank": r0, "gap": gap, "above": nm}
+    rep = {"week": a, "end": b, "minutes": mins, "prev_minutes": pmins, "by_subject": by_sub,
+           "floor_days": sum(1 for v in cur.values() if qualifies(v, u["daily_min"])), "prev_floor_days": sum(1 for v in prv.values() if qualifies(v, u["daily_min"])),
+           "best_day": bd[0], "best_day_minutes": bd[1]["total"] if bd[1] else 0,
+           "longest_block": one("SELECT COALESCE(MAX(minutes),0) FROM focus WHERE user_id=? AND kind='timer' AND day BETWEEN ? AND ?", a, b),
+           "xp": grind(conn, uid, a, b), "prev_xp": grind(conn, uid, pa, pb),
+           "chapters": one("SELECT COUNT(*) FROM chapters WHERE user_id=? AND learned_on BETWEEN ? AND ?", a, b),
+           "revisions": one("SELECT COUNT(*) FROM revisions WHERE user_id=? AND done_at BETWEEN ? AND ?", a, b),
+           "tests": {"n": len(tn), "avg": round(sum(tn) / len(tn)) if tn else None, "prev_avg": round(sum(tp) / len(tp)) if tp else None},
+           "promises": {"made": made, "done": done, "pct": round(done / made * 100) if made else None},
+           "think": think, "prev_think": pthink, "league": league, "peak_hour": peak[0] if peak else None}
+    rep["insight"] = report_insight(rep)
+    return rep
+
+
+@route("GET", "/api/report")
+def api_report(c):
+    """Weekly report. Default is the week that just finished; ?week=<monday> picks another (up to 26 weeks back)."""
+    cur_ws = wstart(today())
+    raw = qp(c, "week")
+    try:
+        ws = pd(raw) if raw else cur_ws - D(7)
+    except ValueError:
+        raise ApiError("bad week")
+    if ws.weekday() != 0 or ws > cur_ws or ws < cur_ws - D(7 * 26):
+        raise ApiError("bad week")
+    r = week_report(c.conn, c.user, ws)
+    r["is_current"] = ws == cur_ws
+    r["this_week"] = iso(cur_ws)
+    r["shared"] = bool(q1(c.conn, "SELECT 1 x FROM report_shares WHERE user_id=? AND week=?", (c.user["id"], iso(ws))))
+    return r
+
+
+@route("POST", "/api/report/share")
+def api_report_share(c):
+    """Post a one-line version of a finished week to the crew feed (once per week)."""
+    if not c.user["crew_id"]:
+        raise ApiError("Join a crew first", 403)
+    cur_ws = wstart(today())
+    try:
+        ws = pd(str(c.body.get("week", "")))
+    except ValueError:
+        raise ApiError("bad week")
+    if ws.weekday() != 0 or ws >= cur_ws or ws < cur_ws - D(7 * 26):
+        raise ApiError("Only finished weeks can be shared")
+    try:
+        c.conn.execute("INSERT INTO report_shares(user_id, week) VALUES(?,?)", (c.user["id"], iso(ws)))
+    except sqlite3.IntegrityError:
+        raise ApiError("Already shared")
+    r = week_report(c.conn, c.user, ws)
+    lg = r["league"]
+    mv = ""
+    if lg:
+        d = lg["prev_rank"] - lg["rank"]
+        mv = f", #{lg['rank']} in the league" + (f" ({'up' if d > 0 else 'down'} {abs(d)})" if d else "")
+    feed(c, "report", f"posted their week: {fmin(r['minutes'])} focus, {r['floor_days']}/7 floor days{mv}")
+    return {"ok": True}
 
 
 @route("GET", "/api/growth")

@@ -298,6 +298,19 @@ try:
     check("growth view", s == 200 and len(r["weeks"]) == 12 and r["think"]["n"] == 1 and r["think"]["fastest"] in (1, 2) and "records" in r, str(r)[:300])
     check("growth needs login", Client().call("GET", "/api/growth")[0] == 401)
 
+    # weekly report
+    s, r = e.call("GET", "/api/report?week=" + (dt.date.today() - dt.timedelta(days=dt.date.today().weekday())).isoformat())
+    check("report (this week)", s == 200 and r["is_current"] and r["minutes"] > 0 and r["league"] and isinstance(r["insight"], str) and len(r["insight"]) > 10, str(r)[:300])
+    s, r = e.call("GET", "/api/report")
+    check("report (last week) default", s == 200 and not r["is_current"] and r["minutes"] == 0, str(r)[:200])
+    check("report bad week rejected", e.call("GET", "/api/report?week=2026-01-02")[0] == 400 and e.call("GET", "/api/report?week=nope")[0] == 400)
+    check("report needs login", Client().call("GET", "/api/report")[0] == 401)
+    lw = (dt.date.today() - dt.timedelta(days=dt.date.today().weekday() + 7)).isoformat()
+    check("cannot share current week", e.call("POST", "/api/report/share", {"week": (dt.date.today() - dt.timedelta(days=dt.date.today().weekday())).isoformat()})[0] == 400)
+    check("share finished week", e.call("POST", "/api/report/share", {"week": lw})[0] == 200)
+    check("share only once", e.call("POST", "/api/report/share", {"week": lw})[0] == 400)
+    check("share posts to feed", any(x["kind"] == "report" for x in e.call("GET", "/api/crew")[1]["feed"]))
+
     # admin
     s, r = a.call("GET", "/api/admin/stats"); check("admin stats", s == 200 and r["app"]["users"] >= 4 and "rss_mb" in r["server"] and r["app"]["messages_total"] > 0, r)
     check("non-admin blocked from stats", b.call("GET", "/api/admin/stats")[0] == 403)

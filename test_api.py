@@ -278,6 +278,26 @@ try:
     feed_kinds = [x["kind"] for x in f.call("GET", "/api/crew")[1]["feed"]]
     check("overtake posts a rank event", "rank" in feed_kinds, feed_kinds[:8])
 
+    # think-to-do: open the app, start a block, the gap is measured server-side
+    g = Client()
+    g.call("POST", "/api/register", {"username": "thinker", "pin": "3333", "crew_code": code})
+    check("open ok", g.call("POST", "/api/open", {})[0] == 200)
+    time.sleep(1.2)
+    s, r = g.call("POST", "/api/timer/start", {"subject": "Maths", "target": 25})
+    check("think_s paired on start", s == 200 and r["think_s"] in (1, 2), r)
+    g.call("POST", "/api/timer/stop", {"discard": True})
+    s, r = g.call("POST", "/api/timer/start", {"subject": "Maths", "target": 25})
+    check("no open, no think_s", s == 200 and r["think_s"] is None, r)
+    g.call("POST", "/api/timer/stop", {"discard": True})
+    g.call("POST", "/api/open", {})
+    db.execute("UPDATE app_opens SET opened_at=opened_at-4000 WHERE started_at IS NULL AND user_id=(SELECT id FROM users WHERE username='thinker')"); db.commit()
+    s, r = g.call("POST", "/api/timer/start", {"subject": "Maths", "target": 25})
+    check("opens older than 60 min are ignored", r["think_s"] is None, r)
+    g.call("POST", "/api/timer/stop", {"discard": True})
+    s, r = g.call("GET", "/api/growth")
+    check("growth view", s == 200 and len(r["weeks"]) == 12 and r["think"]["n"] == 1 and r["think"]["fastest"] in (1, 2) and "records" in r, str(r)[:300])
+    check("growth needs login", Client().call("GET", "/api/growth")[0] == 401)
+
     # admin
     s, r = a.call("GET", "/api/admin/stats"); check("admin stats", s == 200 and r["app"]["users"] >= 4 and "rss_mb" in r["server"] and r["app"]["messages_total"] > 0, r)
     check("non-admin blocked from stats", b.call("GET", "/api/admin/stats")[0] == 403)

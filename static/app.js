@@ -183,7 +183,7 @@ async function loadTab(tab) {
     if (!S.ins) S.ins = await api('insights');
   }
   else if (tab === 'reflect') { const [r, w] = await Promise.all([api('reflect'), api('weekly')]); S.refl = r; S.weekly = w; }
-  else if (tab === 'me') S.ins = await api('insights');
+  else if (tab === 'me') { const [ins, gr] = await Promise.all([api('insights'), api('growth')]); S.ins = ins; S.growth = gr; }
   else if (tab === 'chat') await chatLoadThreads();
 }
 async function go(tab) {
@@ -228,8 +228,13 @@ function render() {
 }
 
 /* ---------- boot ---------- */
+/* think-to-do: tell the server when the app is opened (or comes back after 2+ min away). The gap to your next block is measured server-side. */
+function sendOpen() { if (S.user) fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { }); }
+document.addEventListener('visibilitychange', () => { if (document.hidden) S._hid = Date.now(); else if (S._hid && Date.now() - S._hid > 120000 && !(S.today && S.today.timer)) sendOpen(); });
+const fsec = s => s == null ? '–' : s < 90 ? `${Math.round(s)}s` : `${(s / 60).toFixed(1)}m`;
+function thinkToast(r) { if (r && r.think_s != null) toast(`Started in ${fsec(r.think_s)}`, r.think_s <= 60 ? 'No hesitation. That is the whole game.' : 'Time from opening the app to starting a block.'); }
 async function boot() {
-  try { const me = await api('me'); S.user = me.user; await go(S.tab); if (!S.user.onboarded) onboard(); }
+  try { const me = await api('me'); S.user = me.user; sendOpen(); await go(S.tab); if (!S.user.onboarded) onboard(); }
   catch (e) { if (!S.user) renderAuth(); }
 }
 /* ---------- timer engine ---------- */
@@ -646,6 +651,25 @@ function vMe() {
     ${I.ghost ? `<div class="lbl2">You vs your best week</div>${lines([{ v: I.ghost.cum, c: '#7c7c88', d: 1, w: 2 }, { v: I.cum, c: '#3dd6a0', w: 3 }])}<div class="xs mut">Dashed is your best week (${fm(I.ghost.total)}). Green is this week.</div>` : ''}</section>`;
   h += `<section class="card">${lbl('Evidence locker')}<p class="sm mut">When your brain says "I'm a failure", read the court record.</p><div class="grid3"><div class="stat"><b>${e.hours}h</b><span class="xs mut">focused</span></div><div class="stat"><b>${e.days_hit}</b><span class="xs mut">floor days</span></div><div class="stat"><b>${e.longest}</b><span class="xs mut">best streak</span></div><div class="stat"><b>${e.deep}</b><span class="xs mut">deep blocks</span></div><div class="stat"><b>${e.urges_won}</b><span class="xs mut">urges beaten</span></div><div class="stat"><b>${e.learned}</b><span class="xs mut">chapters</span></div></div>
     ${e.wins.length ? '<div class="lbl2">Your own wins</div>' + e.wins.map(w => `<div class="sm" style="padding:3px 0">${esc(w.win)} <span class="xs mut">${esc(w.day)}</span></div>`).join('') : ''}</section>`;
+  const G = S.growth;
+  if (G) {
+    const W = G.weeks, cur = W[11], prv = W[10], avg4 = k => { const v = W.slice(6, 10).map(x => x[k]); return v.reduce((a, b) => a + b, 0) / 4; };
+    const best = k => Math.max(...W.map(x => x[k])), ds = (a, b) => a === b ? '' : a > b ? 'up' : 'dn';
+    const row = (n, k, f) => `<tr><td class="mut">${n}</td><td><b>${f(cur[k])}</b></td><td>${f(prv[k])}</td><td>${f(avg4(k))}</td><td>${f(best(k))}</td></tr>`;
+    const R = G.records, th = G.think;
+    h += `<section class="card">${lbl('Me vs me', G.rank ? `#${G.rank.rank} of ${G.rank.of} weeks` : '')}
+      <p class="sm mut">${G.rank ? `This week is your <b>#${G.rank.rank}</b> best of ${G.rank.of} weeks.` : 'Log focus this week to rank it against your past weeks.'} The only opponent is who you were.</p>
+      <table class="tbl xs"><tr class="mut"><td></td><td>This wk</td><td>Last wk</td><td>4-wk avg</td><td>Best</td></tr>
+        ${row('Focus', 'min', fm)}${row('Floor days', 'floor', v => Math.round(v * 10) / 10)}${row('Deep blocks', 'deep', v => Math.round(v * 10) / 10)}</table>
+      <div class="lbl2 mt8">Personal records</div>
+      <div class="sm">Longest sitting <b>${R.session ? fm(R.session.minutes) : '–'}</b> <span class="xs mut">${R.session ? esc(R.session.day) : ''}</span></div>
+      <div class="sm">Biggest day <b>${R.day ? fm(R.day.m) : '–'}</b> <span class="xs mut">${R.day ? esc(R.day.day) : ''}</span></div>
+      <div class="sm">Longest streak <b>${R.streak}</b> days · Fastest start <b>${fsec(R.fastest)}</b></div></section>`;
+    h += `<section class="card">${lbl('Think-to-do', th.n ? `${th.n} starts tracked` : '')}
+      <p class="sm mut">Seconds between opening the app and starting a block. Shorter means less thinking, more doing.</p>
+      <div class="grid3"><div class="stat"><b>${fsec(th.this)}</b><span class="xs mut">median this wk</span></div><div class="stat"><b>${fsec(th.last)}</b><span class="xs mut">last wk</span></div><div class="stat"><b>${fsec(th.fastest)}</b><span class="xs mut">fastest ever</span></div></div>
+      ${th.daily.some(x => x.med != null) ? `<div class="lbl2 mt8">Last 14 days</div>${bars(th.daily.map(x => x.med || 0), '#3dd6a0')}<div class="xs mut">Each bar is that day's median start time. Lower is better.</div>` : '<div class="xs mut mt8">Start a block after opening the app and your first number shows up here.</div>'}</section>`;
+  }
   h += `<section class="card">${lbl('Last 12 weeks')}<div class="heat">${hm}</div><div class="xs mut mt8">Brighter means more focus. Blue means a streak freeze saved you.</div></section>`;
   h += `<section class="card">${lbl('Weekly hours')}${bars(I.weeks.map(w => w.m), '#7c6af7')}<div class="row between xs mut"><span>8 weeks ago</span><span>this week ${fm(I.weeks[7].m)}</span></div></section>`;
   if (I.hours.some(x => x)) h += `<section class="card">${lbl('Your best focus hours')}<div class="hrs">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut mt4"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm mt8">Peak: <b>${best % 12 || 12}${best < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></section>`;
@@ -694,7 +718,7 @@ function urgeRun(trigger) {
 const val = id => ($('#' + id) || {}).value;
 const A = {
   reload() { location.reload(); },
-  async login() { try { const r = await api('login', { username: val('a_user'), pin: val('a_pin') }); S.user = r.user; S.tab = 'today'; await go('today'); if (!S.user.onboarded) onboard(); } catch (e) { } },
+  async login() { try { const r = await api('login', { username: val('a_user'), pin: val('a_pin') }); S.user = r.user; sendOpen(); S.tab = 'today'; await go('today'); if (!S.user.onboarded) onboard(); } catch (e) { } },
   async register() { try { const r = await api('register', { username: val('a_user'), pin: val('a_pin'), crew_code: val('a_code'), crew_name: val('a_cname') }); S.user = r.user; S.tab = 'today'; await go('today'); onboard(); } catch (e) { } },
   authMode() { S.authMode = S.authMode === 'login' ? 'register' : 'login'; renderAuth(); },
   async logout() { try { await api('logout', {}); } catch (e) { } onLoggedOut(); },
@@ -704,11 +728,11 @@ const A = {
   pickDur(el) { S.pickDur = +el.dataset.v; PREF.set('dur', S.pickDur); render(); },
   pickMode(el) { S.pickMode = el.dataset.v; PREF.set('mode', S.pickMode); render(); },
   crewPeriod(el) { S.crewPeriod = el.dataset.v; render(); },
-  async startTimer() { await api('timer/start', { subject: S.pickSub, target: S.pickDur, mode: S.pickMode === 'stopwatch' ? 'stopwatch' : 'timer' }); await refresh(); },
-  async start5() { await api('timer/start', { subject: S.pickSub, target: 5 }); await refresh(); },
+  async startTimer() { thinkToast(await api('timer/start', { subject: S.pickSub, target: S.pickDur, mode: S.pickMode === 'stopwatch' ? 'stopwatch' : 'timer' })); await refresh(); },
+  async start5() { thinkToast(await api('timer/start', { subject: S.pickSub, target: 5 })); await refresh(); },
   async startPomo() {
     const c = pomoNorm(S.pomoCfg); S.pomoCfg = c; PREF.set('pomo', c);
-    await api('pomo/start', { subject: S.pickSub, total: c.total, work: c.work, brk: c.brk }); await refresh();
+    thinkToast(await api('pomo/start', { subject: S.pickSub, total: c.total, work: c.work, brk: c.brk })); await refresh();
   },
   async skipBreak() { await api('pomo/skip', {}); await refresh(); },
   async endPlan() { if (!confirm('End the pomodoro plan? Completed blocks stay logged.')) return; await api('pomo/stop', {}); S.beepKey = null; await refresh(); },

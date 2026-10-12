@@ -157,6 +157,8 @@ CREATE TABLE IF NOT EXISTS duels(id INTEGER PRIMARY KEY, crew_id INTEGER, a INTE
 CREATE TABLE IF NOT EXISTS boss_battles(id INTEGER PRIMARY KEY, crew_id INTEGER, day TEXT, target_min INTEGER, actual_min INTEGER, passed INTEGER, UNIQUE(crew_id, day));
 CREATE TABLE IF NOT EXISTS chests(user_id INTEGER, day TEXT, reward TEXT, PRIMARY KEY(user_id, day));
 CREATE TABLE IF NOT EXISTS crew_rank(crew_id INTEGER PRIMARY KEY, week TEXT, order_ids TEXT);
+CREATE TABLE IF NOT EXISTS app_opens(id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, opened_at REAL, started_at REAL, think_s INTEGER);
+CREATE INDEX IF NOT EXISTS ix_opens ON app_opens(user_id, day);
 CREATE TABLE IF NOT EXISTS badges(user_id INTEGER, id TEXT, day TEXT, PRIMARY KEY(user_id, id));
 CREATE TABLE IF NOT EXISTS legacy(username TEXT, day TEXT, done INTEGER, total INTEGER);
 CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, thread TEXT NOT NULL, sender INTEGER NOT NULL, recip INTEGER, ts TEXT, body TEXT, deleted INTEGER DEFAULT 0);
@@ -548,7 +550,18 @@ def get_stats(conn, u):
             "core_total": one("SELECT COUNT(*) FROM chapters WHERE user_id=? AND custom=0"),
             "core_learned": one("SELECT COUNT(*) FROM chapters WHERE user_id=? AND custom=0 AND status>=1"),
             "core_mastered": one("SELECT COUNT(*) FROM chapters WHERE user_id=? AND custom=0 AND status>=3"),
-            "glow": glow_of(conn, uid), "uid": uid}
+            "glow": glow_of(conn, uid), "uid": uid, **think_stats(conn, uid)}
+
+
+def median(xs):
+    xs = sorted(xs)
+    n = len(xs)
+    return None if not n else (xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2)
+
+
+def think_stats(conn, uid):
+    rows = [r[0] for r in conn.execute("SELECT think_s FROM app_opens WHERE user_id=? AND started_at IS NOT NULL ORDER BY id DESC LIMIT 200", (uid,)).fetchall()]
+    return {"think_n": len(rows), "fast60": sum(1 for x in rows if x <= 60), "think_med20": median(rows[:20]) if len(rows) >= 20 else None}
 
 
 def glow_of(conn, uid):
@@ -630,6 +643,8 @@ BADGES = [
     ("founder", "🏴", "Founder", "One of the first 13 users", "L", lambda s: s["uid"] <= 13, False),
     ("veteran", "🎖️", "Season 0 Veteran", "Used the original Growth Tracker", "R", lambda s: s["veteran"] >= 1, False),
     ("outgrown", "🦋", "Outgrown", "7-day average beats your old A+ baseline", "E", lambda s: s["ratio"] >= 1.0 and s["last7"] > 0, False),
+    ("ignite10", "🔥", "Instant Ignition", "10 blocks started within 60 s of opening the app", "R", lambda s: s["fast60"] >= 10, False),
+    ("zerohes", "🎯", "Zero Hesitation", "Median start under 2 min over your last 20 blocks", "E", lambda s: s["think_med20"] is not None and s["think_med20"] <= 120, False),
     ("complete", "🌠", "Completionist", "Earn every other badge", "M", None, True),
 ]
 
@@ -1110,6 +1125,32 @@ def timer_start(c):
     if q1(c.conn, "SELECT 1 x FROM timers WHERE user_id=?", (c.user["id"],)) or q1(c.conn, "SELECT 1 x FROM pomo WHERE user_id=?", (c.user["id"],)):
         raise ApiError("A timer is already running")
     c.conn.execute("INSERT INTO timers(user_id,subject,started,target,mode) VALUES(?,?,?,?,?)", (c.user["id"], sub, time.time(), target, mode))
+    return {"ok": True, "think_s": think_pair(c.conn, c.user["id"])}
+
+
+def think_pair(conn, uid):
+    """Pair the pending app-open with a block start. think_s = seconds between opening the app and starting. Opens older than 60 min don't count."""
+    r = q1(conn, "SELECT id, opened_at FROM app_opens WHERE user_id=? AND started_at IS NULL ORDER BY id DESC LIMIT 1", (uid,))
+    if not r:
+        return None
+    t = time.time()
+    gap = t - r["opened_at"]
+    if gap > 3600 or gap < 0:
+        conn.execute("DELETE FROM app_opens WHERE id=?", (r["id"],))
+        return None
+    conn.execute("UPDATE app_opens SET started_at=?, think_s=? WHERE id=?", (t, int(gap), r["id"]))
+    return int(gap)
+
+
+@route("POST", "/api/open")
+def api_open(c):
+    """The client calls this when the app is opened or comes back after 2+ min hidden. Latest open wins."""
+    uid, t = c.user["id"], time.time()
+    r = q1(c.conn, "SELECT id FROM app_opens WHERE user_id=? AND started_at IS NULL ORDER BY id DESC LIMIT 1", (uid,))
+    if r:
+        c.conn.execute("UPDATE app_opens SET opened_at=?, day=? WHERE id=?", (t, iso(today()), r["id"]))
+    else:
+        c.conn.execute("INSERT INTO app_opens(user_id, day, opened_at) VALUES(?,?,?)", (uid, iso(today()), t))
     return {"ok": True}
 
 
@@ -1281,7 +1322,7 @@ def pomo_start(c):
                    "VALUES(?,?,?,?,?,?,?,0,1,'work',?,?,?)",
                    (uid, sub, total, work, brk, max(brk * 2, 15), 4 if work <= 30 else 3, t, plan[0] * 60, t))
     c.conn.execute("INSERT INTO timers(user_id,subject,started,target,mode) VALUES(?,?,?,?,'timer')", (uid, sub, t, plan[0]))
-    return {"ok": True}
+    return {"ok": True, "think_s": think_pair(c.conn, uid)}
 
 
 @route("POST", "/api/pomo/skip")
@@ -1606,6 +1647,42 @@ def api_crew(c):
     return {"crew": {"name": crew["name"], "code": crew["code"], "goal_h": crew["goal_h"]}, "members": out, "rival": rival,
             "team": {"minutes": sum(m["week_min"] for m in out), "goal": int(goal_min)}, "feed": fd, "duels": duels, "me": u["id"], "hall": hall, "records": records,
             "boss": boss_status, "crown": crown_holder}
+
+
+@route("GET", "/api/growth")
+def api_growth(c):
+    """Think-to-do clock and the Me-vs-Me board. Private to the user."""
+    u = c.user
+    uid, t = u["id"], today()
+    ws0 = wstart(t)
+    first = ws0 - D(77)
+    stt = day_stats(c.conn, uid, first, t)
+    weeks = []
+    for i in range(11, -1, -1):
+        ws = ws0 - D(7 * i)
+        a, b = iso(ws), iso(ws + D(6))
+        mins = sum(v["total"] for d, v in stt.items() if a <= d <= b)
+        floor = sum(1 for d, v in stt.items() if a <= d <= b and qualifies(v, u["daily_min"]))
+        deep = c.conn.execute("SELECT COUNT(*) FROM focus WHERE user_id=? AND kind='timer' AND minutes>=50 AND day BETWEEN ? AND ?", (uid, a, b)).fetchone()[0]
+        th = median([r[0] for r in c.conn.execute("SELECT think_s FROM app_opens WHERE user_id=? AND started_at IS NOT NULL AND day BETWEEN ? AND ?", (uid, a, b)).fetchall()])
+        weeks.append({"w": a, "min": mins, "floor": floor, "deep": deep, "think": th})
+    allw = {}
+    for r in q(c.conn, "SELECT day, SUM(minutes) m FROM focus WHERE user_id=? GROUP BY day", (uid,)):
+        k = iso(wstart(pd(r["day"])))
+        allw[k] = allw.get(k, 0) + r["m"]
+    cur = allw.get(iso(ws0), 0)
+    rank = {"rank": 1 + sum(1 for k, m in allw.items() if k != iso(ws0) and m > cur), "of": len([m for m in allw.values() if m > 0])} if cur > 0 else None
+    daily = []
+    for i in range(13, -1, -1):
+        d = iso(t - D(i))
+        daily.append({"d": d, "med": median([r[0] for r in c.conn.execute("SELECT think_s FROM app_opens WHERE user_id=? AND started_at IS NOT NULL AND day=?", (uid, d)).fetchall()])})
+    fastest = c.conn.execute("SELECT MIN(think_s) FROM app_opens WHERE user_id=? AND started_at IS NOT NULL", (uid,)).fetchone()[0]
+    ls = q1(c.conn, "SELECT minutes, day FROM focus WHERE user_id=? AND kind='timer' ORDER BY minutes DESC, id LIMIT 1", (uid,))
+    bd = q1(c.conn, "SELECT day, SUM(minutes) m FROM focus WHERE user_id=? GROUP BY day ORDER BY m DESC LIMIT 1", (uid,))
+    return {"weeks": weeks, "rank": rank,
+            "think": {"this": weeks[-1]["think"], "last": weeks[-2]["think"], "fastest": fastest, "daily": daily,
+                      "n": c.conn.execute("SELECT COUNT(*) FROM app_opens WHERE user_id=? AND started_at IS NOT NULL", (uid,)).fetchone()[0]},
+            "records": {"session": ls, "day": bd, "fastest": fastest, "streak": max(u["longest"], u["run"])}}
 
 
 @route("GET", "/api/profile")

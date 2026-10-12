@@ -100,7 +100,7 @@ function handleEvents(evs) {
     const b = $('.xp>i'); if (b) { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
   }
   evs.filter(e => e.t === 'info').forEach(e => toast(e.text));
-  evs.filter(e => e.t === 'badge').forEach(e => { toast(`${e.emoji} ${e.name}`, e.desc, 'badge'); confetti(); });
+  evs.filter(e => e.t === 'badge').forEach(e => { toast(`${e.emoji} ${e.name}`, `${e.rarity || ''} · +${e.xp || 0} XP · ${e.desc}`, 'badge'); confetti(); });
   const lu = evs.find(e => e.t === 'levelup');
   if (lu) {
     confetti();
@@ -116,6 +116,27 @@ function closeModal() {
   if (!S.fs) document.body.classList.remove('noscroll');
 }
 const modalOpen = () => !$('#modal').classList.contains('hidden');
+
+/* ---------- profile sheet (same-crew, public stats only) ---------- */
+async function profileOpen(id) {
+  let P; try { P = await api('profile?uid=' + id); } catch (e) { return; }
+  const u = P.user, L = P.level, s = P.stats, st = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
+  const hm = P.heat.map(c => `<i title="${esc(c.d)}: ${fm(c.m)}" style="background:${c.m === 0 ? '#17171c' : `rgba(124,106,247,${Math.min(.25 + c.m / 240 * .75, 1)})`}"></i>`).join('');
+  const subTot = Object.values(P.sub30).reduce((a, b) => a + b, 0);
+  modal(`<div class="row g8">${avatar(u.emoji, u.color)}<div class="grow"><h2>${esc(u.display)}${u.me ? ' <span class="you">you</span>' : ''}</h2>
+      <div class="xs mut">Lv ${L.level} ${esc(L.emoji)} ${esc(L.rank)} · ${P.streak.now}-day streak${P.live ? ` · <span class="live-t">live: ${esc(P.live.subject)}</span>` : ''}</div></div></div>
+    ${u.identity ? `<div class="quote">I am ${esc(u.identity)}</div>` : ''}
+    <div class="bar thin mt8"><i style="width:${L.pct}%"></i></div><div class="xs mut">${L.xp.toLocaleString()} XP</div>
+    <div class="grid3 mt8">${st(s.hours + 'h', 'focused')}${st(P.streak.longest, 'best streak')}${st(s.floor_days, 'floor days')}${st(fm(s.best_day), 'best day')}${st(fm(s.best_session), 'best sitting')}${st(s.deep, 'deep blocks')}</div>
+    <div class="lbl2 mt8">Trophy shelf · ${P.badges.length}/${P.badge_total}</div>
+    ${P.badges.length ? `<div class="grid3">${P.badges.map(b => `<div class="badge r-${b.rarity}" title="${esc(b.desc)}"><s>${esc(b.emoji)}</s><b>${esc(b.name)}</b><div class="rar">${esc(b.rname)}</div><div class="xs mut">${esc(b.day || '')}</div></div>`).join('')}</div>` : '<div class="mut sm">No badges yet.</div>'}
+    <div class="lbl2 mt8">Last 12 weeks</div><div class="heat">${hm}</div>
+    <div class="lbl2 mt8">Weekly hours</div>${bars(P.weeks, '#7c6af7')}
+    ${subTot ? `<div class="lbl2 mt8">Subjects, 30 days</div>${Object.entries(P.sub30).sort((a, b) => b[1] - a[1]).map(([k, m]) => `<div class="row g8" style="margin:5px 0"><span class="sm" style="width:78px">${esc(k)}</span><div class="bar thin grow"><i style="width:${m / subTot * 100}%;background:${SCOL[k] || '#9aa0b4'}"></i></div><span class="xs mut">${fm(m)}</span></div>`).join('')}` : ''}
+    <div class="lbl2 mt8">Duels</div><div class="sm">${P.duels.won}W ${P.duels.played - P.duels.won}L</div>
+    ${P.recent.length ? `<div class="lbl2 mt8">Recent</div>${P.recent.map(r => `<div class="sm" style="padding:3px 0">${esc(r.text).replace(/\*\*/g, '')} <span class="xs mut">${ago(r.ts)}</span></div>`).join('')}` : ''}
+    <button class="btn-xl mt8" data-act="closeModal">Close</button>`);
+}
 
 /* ---------- svg helpers ---------- */
 function bars(vals, color, h = 70) {
@@ -518,8 +539,8 @@ function vCrew() {
     <div class="lbl2">${{ week: "This week's league", month: 'This month', all: 'All-time legends' }[S.crewPeriod]}</div>
     ${sorted.map((m, i) => {
     const p = pv(m), dot = m.live ? '<span class="dot live"></span>' : m.qualified ? '<span class="dot g"></span>' : m.today_min > 0 ? '<span class="dot y"></span>' : '<span class="dot"></span>';
-    return `<div class="lb ${m.me ? 'me' : ''}"><div class="rk ${i < 3 ? 'top' + (i + 1) : ''}">${i === 0 ? ic('crown', 16) : i + 1}</div>${avatar(m.emoji, m.color)}
-      <div class="grow lbm"><div class="lbn"><b class="ell">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dot}</div>
+    return `<div class="lb ${m.me ? 'me' : ''}"><div class="rk ${i < 3 ? 'top' + (i + 1) : ''}">${i === 0 ? ic('crown', 16) : i + 1}</div><span data-act="profile" data-id="${m.id}" style="cursor:pointer">${avatar(m.emoji, m.color)}</span>
+      <div class="grow lbm" data-act="profile" data-id="${m.id}" style="cursor:pointer"><div class="lbn"><b class="ell">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dot}</div>
         <div class="xs mut ell">Lv ${m.level.level} ${esc(m.level.emoji)} ${esc(m.level.rank)} · ${ic('flame', 11)}${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span class="live-t">live: ${esc(m.live.subject)}</span>` : ''}</div>
         <div class="bar thin mt4"><i style="width:${Math.round(p.xp / top * 100)}%;background:${esc(m.color)}"></i></div></div>
       <div class="lbx"><b class="num">${p.xp.toLocaleString()}</b><div class="xs mut">XP · ${fm(p.min)}</div>${!m.me && !m.qualified ? `<button class="btn-s nudge" ${m.nudged ? 'disabled' : ''} data-act="nudge" data-id="${m.id}">${m.nudged ? 'Nudged' : 'Nudge'}</button>` : ''}</div></div>`;
@@ -538,7 +559,7 @@ function vCrew() {
   const others = C.members.filter(m => !m.me);
   h += `<section class="card">${lbl('Duels')}${C.duels.length ? C.duels.map(d => `<div class="q"><div class="grow"><b>${esc(d.an)}</b> vs <b>${esc(d.bn)}</b> <span class="xs mut">${d.days}d · most focus minutes wins</span>${d.status === 'active' ? `<div class="xs">${fm(d.a_min)} vs ${fm(d.b_min)} · ends ${esc(d.end)}</div>` : '<div class="xs mut">Waiting for accept…</div>'}</div>${d.status === 'pending' && d.b === C.me ? `<button class="btn-p btn-s" data-act="acceptDuel" data-id="${d.id}">Accept</button>` : ''}</div>`).join('') : '<div class="mut sm">No duels running. Pick a rival.</div>'}
     ${others.length ? `<div class="row g8 mt12"><select id="du_o">${others.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('')}</select><select id="du_d" style="width:84px"><option value="3">3d</option><option value="7" selected>7d</option><option value="14">14d</option></select><button data-act="duel">Challenge</button></div>` : ''}</section>`;
-  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed"><div class="row g8">${avatar(f.emoji, f.color, 'sm')}<div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
+  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm')}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
     <div class="rxrow">${['🔥', '💪', '👏', '😤', '🫡'].map(e => `<button class="rx ${f.mine === e ? 'me' : ''}" data-act="react" data-id="${f.id}" data-e="${e}">${e}${f.reactions[e] ? ' ' + f.reactions[e] : ''}</button>`).join('')}</div></div>`).join('') : '<div class="mut sm">Quiet. Be the first to move.</div>'}</section>`;
   return h;
 }
@@ -627,7 +648,7 @@ function vMe() {
   if (I.hours.some(x => x)) h += `<section class="card">${lbl('Your best focus hours')}<div class="hrs">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut mt4"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm mt8">Peak: <b>${best % 12 || 12}${best < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></section>`;
   if (Object.keys(I.sub7).length) { const tot = Object.values(I.sub7).reduce((a, b) => a + b, 0); h += `<section class="card">${lbl('Subject balance', '7 days')}${Object.entries(I.sub7).sort((a, b) => b[1] - a[1]).map(([s, m]) => `<div class="row g8" style="margin:8px 0"><span class="sm w78">${esc(s)}</span><div class="bar grow"><i style="width:${m / tot * 100}%;background:${SCOL[s] || '#9a9aa8'}"></i></div><span class="xs mut w56 r">${fm(m)}</span></div>`).join('')}</section>`; }
   if (I.urge_triggers.length) h += `<section class="card">${lbl('Your triggers')}<div class="chips">${I.urge_triggers.map(t => `<span class="pill">${esc(t.trigger)} ×${t.n}</span>`).join('')}</div></section>`;
-  h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge ${b.got ? '' : 'off'}"><s>${esc(b.emoji)}</s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div></div>`).join('')}</div></section>`;
+  h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge r-${b.rarity} ${b.got ? '' : 'off'}"><s>${esc(b.emoji)}</s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div><div class="rar">${esc(b.rname)} · +${b.xp} XP · held by ${b.holders}/${b.total}</div></div>`).join('')}</div></section>`;
   if (u.admin) h += `<section class="card">${lbl('Server')}<p class="sm mut">You run this crew. Live stats, PIN resets, moderation, backups.</p><button class="btn-xl" data-act="admin">Open server dashboard</button></section>`;
   h += `<section class="card">${lbl('Settings')}<label>Display name</label><input id="s_name" value="${esc(u.display)}" maxlength="20"><label>Identity: "I am becoming someone who…"</label><input id="s_id" value="${esc(u.identity)}" placeholder="shows up before he feels like it" maxlength="140">
     <div class="grid2"><div><label>Old A+ you studied (hrs/day)</label><input id="s_base" type="number" step="0.5" value="${u.baseline_h}"></div><div><label>Daily floor (min)</label><input id="s_floor" type="number" value="${u.daily_min}"></div></div>
@@ -847,7 +868,7 @@ function chatPaint(stick) {
     const rx = m.re ? `<div class="rxs">${Object.entries(m.re).map(([e, n]) => `<span class="rx ${m.mine === e ? 'me' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e} ${n}</span>`).join('')}</div>` : '';
     const acts = sel ? `<div class="acts">${CHAT_EMOJIS.map(e => `<button class="${m.mine === e ? 'on' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}<button data-act="chatReply" data-id="${m.id}" title="Reply">↩</button>${canEdit ? `<button data-act="chatEdit" data-id="${m.id}" title="Edit">✏️</button>` : ''}${mine ? `<button data-act="chatDel" data-id="${m.id}" title="Delete">🗑</button>` : ''}</div>` : '';
     const qt = m.reply ? `<div class="qt" data-act="chatJump" data-id="${m.reply.id}"><b>${esc((CH.people[m.reply.uid] || {}).display || 'Member')}</b> ${esc(m.reply.text)}</div>` : '';
-    h += `<div class="msg ${grp ? 'grp' : ''} ${ment ? 'ment' : ''} ${sel ? 'sel' : ''}" data-act="chatSel" data-id="${m.id}" data-mid="${m.id}">${grp ? '<div class="av sp"></div>' : `<div class="av" style="background:${esc(p.color)}33;border:2px solid ${esc(p.color)}">${esc(p.emoji)}</div>`}
+    h += `<div class="msg ${grp ? 'grp' : ''} ${ment ? 'ment' : ''} ${sel ? 'sel' : ''}" data-act="chatSel" data-id="${m.id}" data-mid="${m.id}">${grp ? '<div class="av sp"></div>' : `<div class="av" data-act="profile" data-id="${m.uid}" style="background:${esc(p.color)}33;border:2px solid ${esc(p.color)};cursor:pointer">${esc(p.emoji)}</div>`}
       <div class="mb">${grp ? '' : `<div class="mh"><b style="color:${esc(p.color)}" data-act="chatMention" data-v="${esc(p.display)}">${esc(p.display)}</b><span class="xs mut">${chatClock(m.ts)}</span></div>`}${qt}<div class="mt">${chatFmt(m.text)}${m.edited ? ' <span class="xs mut">(edited)</span>' : ''}</div>${rx}${acts}</div></div>`;
     prev = m;
   });
@@ -968,6 +989,7 @@ async function chatOlder() {
   } catch (e) { }
 }
 Object.assign(A, {
+  profile(el) { return profileOpen(+el.dataset.id); },
   chatOpen(el) { return chatOpen(el.dataset.v); },
   async chatBack() { chatStop(); CH.open = null; try { await chatLoadThreads(); } catch (e) { } render(); },
   chatSend, chatOlder, chatSel, chatReact, chatReply, chatEdit, chatCancel, chatJump, chatMention,

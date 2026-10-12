@@ -260,7 +260,15 @@ try:
     check("small gaps are forgiven", s == 200 and r["minutes"] in (49, 50) and "away" not in r, r)
     s, r = e.call("GET", "/api/me")
     li = f.call("GET", "/api/today")[1]["level"]
-    check("level curve k=190", li["hi"] == 190 and li["lo"] == 0, li)
+    check("level curve k=190", li["lo"] == 190 * (li["level"] - 1) ** 2 and li["hi"] == 190 * li["level"] ** 2, li)
+
+    # profiles: same crew only, no private data
+    s, r = e.call("GET", f"/api/profile?uid={A_ID}")
+    check("profile visible in same crew", s == 200 and r["user"]["id"] == A_ID and "badges" in r and len(r["heat"]) == 84, str(r)[:200])
+    check("profile has no private fields", not ({"reflections", "mood", "urges", "tests", "dms"} & set(r.keys())))
+    check("profile blocked across crews", dd.call("GET", f"/api/profile?uid={A_ID}")[0] == 404)
+    check("profile needs login", Client().call("GET", f"/api/profile?uid={A_ID}")[0] == 401)
+    check("own profile flagged me", a.call("GET", f"/api/profile?uid={A_ID}")[1]["user"]["me"] is True)
 
     # admin
     s, r = a.call("GET", "/api/admin/stats"); check("admin stats", s == 200 and r["app"]["users"] >= 4 and "rss_mb" in r["server"] and r["app"]["messages_total"] > 0, r)

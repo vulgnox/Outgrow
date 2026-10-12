@@ -166,3 +166,11 @@ details summary{cursor:pointer;color:var(--mut);padding:10px 0 4px;font-size:13p
 .fs-blocks{display:flex;gap:6px;margin-top:28px;flex-wrap:wrap;justify-content:center;max-width:min(86vw,420px)}
 .fs-blocks i{width:34px;height:8px;border-radius:99px;background:#17171c;position:relative;overflow:hidden}.fs-blocks i.on{background:var(--sc)}
 .fs-blocks i.cur:after{content:"";position:absolute;left:0;top:0;bottom:0;width:calc(var(--p,0)*100%);background:var(--sc)}
+
+/* badge rarity */
+.badge{border:1px solid transparent}
+.badge .rar{margin-top:4px;font-size:10px;font-weight:700;letter-spacing:.03em}
+.badge.r-C{--rc:#9aa0b4}.badge.r-R{--rc:#3ea6ff}.badge.r-E{--rc:#a24cff}.badge.r-L{--rc:#ffb020}.badge.r-M{--rc:#ff4d5e}
+.badge[class*="r-"]{border-color:color-mix(in srgb,var(--rc) 45%,transparent)}
+.badge[class*="r-"] .rar{color:var(--rc)}
+.badge.r-L:not(.off),.badge.r-M:not(.off){box-shadow:0 0 14px color-mix(in srgb,var(--rc) 35%,transparent)}

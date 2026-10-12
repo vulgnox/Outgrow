@@ -350,7 +350,6 @@ def build_feed_embed(u, kind, text):
             f"{emoji} Badge Unlocked!",
             f"**{u['display']}** {text}",
             color,
-            fields={"XP": "+50"},
             thumbnail=u["emoji"],
             footer=f"RAGDAMAXING · {u['username']}"
         )
@@ -539,49 +538,132 @@ def get_stats(conn, u):
             "redeems": one("SELECT COUNT(*) FROM xp WHERE user_id=? AND key LIKE 'redeem:%'"),
             "longest": u["longest"], "run": u["run"], "veteran": one("SELECT COUNT(*) FROM xp WHERE user_id=? AND key='legacy:season0'"),
             "ratio": ratio, "last7": last7,
-            "best_session": one("SELECT COALESCE(MAX(minutes),0) FROM focus WHERE user_id=? AND kind='timer'")}
+            "best_session": one("SELECT COALESCE(MAX(minutes),0) FROM focus WHERE user_id=? AND kind='timer'"),
+            "best_day": one("SELECT COALESCE(MAX(s),0) FROM (SELECT SUM(minutes) s FROM focus WHERE user_id=? GROUP BY day)"),
+            "best_week": one("SELECT COALESCE(MAX(s),0) FROM (SELECT SUM(minutes) s FROM focus WHERE user_id=? GROUP BY strftime('%Y-%W', day))"),
+            "night": one("SELECT COUNT(*) FROM focus WHERE user_id=? AND kind='timer' AND (hour>=22 OR hour<3)"),
+            "duel_wins": one("SELECT COUNT(*) FROM duels WHERE winner=? AND status='done'"),
+            "boss_wins": one("SELECT COUNT(*) FROM xp WHERE user_id=? AND key LIKE 'boss:%'"),
+            "core_total": one("SELECT COUNT(*) FROM chapters WHERE user_id=? AND custom=0"),
+            "core_learned": one("SELECT COUNT(*) FROM chapters WHERE user_id=? AND custom=0 AND status>=1"),
+            "core_mastered": one("SELECT COUNT(*) FROM chapters WHERE user_id=? AND custom=0 AND status>=3"),
+            "glow": glow_of(conn, uid), "uid": uid}
 
 
+def glow_of(conn, uid):
+    """Percentage-point gain from your first test to your latest (needs 5+ tests)."""
+    rows = [r[0] for r in conn.execute("SELECT score*100.0/maxscore FROM tests WHERE user_id=? ORDER BY day, id", (uid,)).fetchall()]
+    return round(rows[-1] - rows[0], 1) if len(rows) >= 5 else 0
+
+
+# Rarity -> (name, XP). Badge XP is not capped and not grind. Ids of old badges are reused where the meaning is unchanged (no double pay).
+RARITY = {"C": ("Common", 100), "R": ("Rare", 300), "E": ("Epic", 800), "L": ("Legendary", 2000), "M": ("Mythic", 5000)}
+# (id, emoji, name, description, rarity, test, secret)
 BADGES = [
-    ("first", "🚀", "First Blood", "Log your first focus session", lambda s: s["sessions"] >= 1),
-    ("h10", "⏱️", "10 Hours", "10 hours of focus", lambda s: s["minutes"] >= 600),
-    ("h50", "🔥", "50 Hours", "50 hours of focus", lambda s: s["minutes"] >= 3000),
-    ("h100", "💎", "100 Hours", "100 hours of focus", lambda s: s["minutes"] >= 6000),
-    ("h250", "👑", "250 Hours", "250 hours of focus", lambda s: s["minutes"] >= 15000),
-    ("deep5", "🧠", "Deep Diver", "5 deep blocks (50+ min)", lambda s: s["deep"] >= 5),
-    ("deep25", "🌊", "Ocean Mind", "25 deep blocks", lambda s: s["deep"] >= 25),
-    ("st3", "🕯️", "3-Day Chain", "3-day streak", lambda s: s["longest"] >= 3),
-    ("st7", "⚔️", "Week Warrior", "7-day streak", lambda s: s["longest"] >= 7),
-    ("st14", "⚡", "Fortnight", "14-day streak", lambda s: s["longest"] >= 14),
-    ("st30", "🏆", "Unbreakable", "30-day streak", lambda s: s["longest"] >= 30),
-    ("early5", "🌅", "Early Bird", "5 sessions started before 7 AM", lambda s: s["early"] >= 5),
-    ("urge10", "🛡️", "Urge Slayer", "Beat 10 urges", lambda s: s["urges_won"] >= 10),
-    ("rev25", "🔁", "Memory Forge", "25 spaced revisions done", lambda s: s["revs"] >= 25),
-    ("test5", "📝", "Test Pilot", "Log 5 tests", lambda s: s["tests"] >= 5),
-    ("master5", "🎓", "Chapter Crusher", "Master 5 chapters", lambda s: s["mastered"] >= 5),
-    ("redeem", "🌱", "Never Twice", "Come back right after a miss", lambda s: s["redeems"] >= 1),
-    ("refl7", "🪞", "Self-Aware", "7 nightly reflections", lambda s: s["reflections"] >= 7),
-    ("weekly1", "🧭", "Navigator", "First weekly review", lambda s: s["weeklies"] >= 1),
-    ("veteran", "🎖️", "Season 0 Veteran", "Used the original Growth Tracker", lambda s: s["veteran"] >= 1),
-    ("outgrown", "🦋", "Ragdamaxed", "7-day average beats your old A+ baseline", lambda s: s["ratio"] >= 1.0 and s["last7"] > 0),
-    ("h500", "☠️", "500 Hours", "500 hours of focus", lambda s: s["minutes"] >= 30000),
-    ("st60", "💠", "Diamond Chain", "60-day streak", lambda s: s["longest"] >= 60),
-    ("marathon", "🏃", "Marathoner", "2 hours in one sitting", lambda s: s["best_session"] >= 120),
-    ("beast", "🐉", "Ragda Beast", "3 hours in one sitting", lambda s: s["best_session"] >= 180),
-    ("deep100", "🕳️", "Abyss Walker", "100 deep blocks (50+ min)", lambda s: s["deep"] >= 100),
+    # lifetime hours
+    ("first", "🚀", "First Blood", "Log your first focus session", "C", lambda s: s["sessions"] >= 1, False),
+    ("h10", "⏱️", "Warm-Up", "10 hours of focus", "C", lambda s: s["minutes"] >= 600, False),
+    ("h50", "🔥", "Ignition", "50 hours of focus", "C", lambda s: s["minutes"] >= 3000, False),
+    ("h100", "💎", "Triple Digits", "100 hours of focus", "R", lambda s: s["minutes"] >= 6000, False),
+    ("h250", "👑", "Quarter Grand", "250 hours of focus", "R", lambda s: s["minutes"] >= 15000, False),
+    ("h500", "☠️", "Half-K Club", "500 hours of focus", "E", lambda s: s["minutes"] >= 30000, False),
+    ("h1000", "🌌", "The Thousand", "1,000 hours of focus", "L", lambda s: s["minutes"] >= 60000, False),
+    ("h1500", "😈", "Unholy Hours", "1,500 hours of focus", "M", lambda s: s["minutes"] >= 90000, False),
+    # one day
+    ("day4", "⛽", "Full Tank", "4 hours in one day", "C", lambda s: s["best_day"] >= 240, False),
+    ("day8", "🏭", "Eight-Hour Shift", "8 hours in one day", "R", lambda s: s["best_day"] >= 480, False),
+    ("day10", "👹", "Overtime Demon", "10 hours in one day", "E", lambda s: s["best_day"] >= 600, False),
+    ("day12", "🛌", "Sleep Is Optional", "12 hours in one day", "L", lambda s: s["best_day"] >= 720, False),
+    ("day14", "🕳️", "The Singularity", "14 hours in one day", "M", lambda s: s["best_day"] >= 840, True),
+    # one sitting
+    ("hop", "⚡", "Hour of Power", "60 min in one sitting", "C", lambda s: s["best_session"] >= 60, False),
+    ("marathon", "🏃", "Marathoner", "2 hours in one sitting", "R", lambda s: s["best_session"] >= 120, False),
+    ("beast", "🐉", "Ragda Beast", "3 hours in one sitting", "E", lambda s: s["best_session"] >= 180, False),
+    ("unbroken", "🧱", "Unbroken", "4 hours in one sitting", "L", lambda s: s["best_session"] >= 240, False),
+    # one week
+    ("wk35", "💼", "Full-Time Grind", "35 hours in one week", "R", lambda s: s["best_week"] >= 2100, False),
+    ("wk56", "⏰", "Overtime", "56 hours in one week", "E", lambda s: s["best_week"] >= 3360, False),
+    ("wk70", "🧑‍💼", "Two Jobs", "70 hours in one week", "L", lambda s: s["best_week"] >= 4200, False),
+    ("wk84", "🤖", "Machine", "84 hours in one week", "M", lambda s: s["best_week"] >= 5040, False),
+    # streaks
+    ("st3", "🕯️", "Hat-Trick", "3-day streak", "C", lambda s: s["longest"] >= 3, False),
+    ("st7", "⚔️", "Seven Seals", "7-day streak", "C", lambda s: s["longest"] >= 7, False),
+    ("st14", "🌩️", "Fortnight Fury", "14-day streak", "R", lambda s: s["longest"] >= 14, False),
+    ("st30", "🏆", "Unbreakable", "30-day streak", "E", lambda s: s["longest"] >= 30, False),
+    ("st60", "💠", "Diamond Chain", "60-day streak", "L", lambda s: s["longest"] >= 60, False),
+    ("st100", "🏛️", "Centurion", "100-day streak", "L", lambda s: s["longest"] >= 100, False),
+    ("st150", "♾️", "Never Broke", "150-day streak", "M", lambda s: s["longest"] >= 150, False),
+    # deep blocks
+    ("deep10", "🧠", "Deep Diver", "10 deep blocks (50+ min)", "C", lambda s: s["deep"] >= 10, False),
+    ("deep50", "🌊", "Ocean Mind", "50 deep blocks", "R", lambda s: s["deep"] >= 50, False),
+    ("deep150", "🕳️", "Abyss Walker", "150 deep blocks", "E", lambda s: s["deep"] >= 150, False),
+    ("deep400", "🐋", "Leviathan", "400 deep blocks", "L", lambda s: s["deep"] >= 400, False),
+    # time of day
+    ("early5", "🌅", "Dawn Patrol", "5 sessions started before 7 AM", "C", lambda s: s["early"] >= 5, False),
+    ("night15", "🌙", "Night Shift", "15 sessions started 10 PM to 3 AM", "R", lambda s: s["night"] >= 15, False),
+    ("early30", "☀️", "Sunrise Cult", "30 sessions started before 7 AM", "E", lambda s: s["early"] >= 30, False),
+    # study
+    ("chap10", "📖", "Page Turner", "Learn 10 chapters", "C", lambda s: s["learned"] >= 10, False),
+    ("chap37", "🗺️", "Half the Map", "Learn 37 core chapters", "R", lambda s: s["core_learned"] >= 37, False),
+    ("sylcl", "🎓", "Syllabus Cleared", "Learn every core chapter", "E", lambda s: s["core_total"] > 0 and s["core_learned"] >= s["core_total"], False),
+    ("grand", "🧙", "Grandmaster", "Master every core chapter", "L", lambda s: s["core_total"] > 0 and s["core_mastered"] >= s["core_total"], False),
+    ("rev25", "🔁", "Memory Forge", "25 spaced revisions done", "C", lambda s: s["revs"] >= 25, False),
+    ("rev100", "⚙️", "Recall Machine", "100 revisions", "R", lambda s: s["revs"] >= 100, False),
+    ("rev300", "🐘", "Elephant Brain", "300 revisions", "E", lambda s: s["revs"] >= 300, False),
+    ("test5", "📝", "Test Pilot", "Log 5 tests", "C", lambda s: s["tests"] >= 5, False),
+    ("test15", "🛡️", "Exam Hardened", "Log 15 tests", "R", lambda s: s["tests"] >= 15, False),
+    ("glow", "📈", "Glow-Up", "+20 points from your first test to your latest (5+ tests)", "E", lambda s: s["glow"] >= 20, False),
+    ("master5", "🏅", "Chapter Crusher", "Master 5 chapters", "C", lambda s: s["mastered"] >= 5, False),
+    # discipline
+    ("urge10", "🛡️", "Urge Slayer", "Beat 10 urges", "C", lambda s: s["urges_won"] >= 10, False),
+    ("urge50", "🧘", "Monk Mode", "Beat 50 urges", "R", lambda s: s["urges_won"] >= 50, False),
+    ("refl7", "🪞", "Self-Aware", "7 nightly reflections", "C", lambda s: s["reflections"] >= 7, False),
+    ("refl30", "🔍", "Inner Auditor", "30 nightly reflections", "R", lambda s: s["reflections"] >= 30, False),
+    ("redeem", "🌱", "Never Twice", "Come back right after a miss", "C", lambda s: s["redeems"] >= 1, False),
+    ("phoenix", "🔥", "Phoenix", "3 comebacks after a miss", "R", lambda s: s["redeems"] >= 3, False),
+    ("weekly1", "🧭", "Navigator", "First weekly review", "C", lambda s: s["weeklies"] >= 1, False),
+    # competitive
+    ("duel1", "🤺", "Duelist", "Win a duel", "C", lambda s: s["duel_wins"] >= 1, False),
+    ("duel5", "🗡️", "Undefeated", "Win 5 duels", "R", lambda s: s["duel_wins"] >= 5, False),
+    ("boss10", "👹", "Boss Slayer", "Part of 10 boss defeats", "R", lambda s: s["boss_wins"] >= 10, False),
+    ("founder", "🏴", "Founder", "One of the first 13 users", "L", lambda s: s["uid"] <= 13, False),
+    ("veteran", "🎖️", "Season 0 Veteran", "Used the original Growth Tracker", "R", lambda s: s["veteran"] >= 1, False),
+    ("outgrown", "🦋", "Outgrown", "7-day average beats your old A+ baseline", "E", lambda s: s["ratio"] >= 1.0 and s["last7"] > 0, False),
+    ("complete", "🌠", "Completionist", "Earn every other badge", "M", None, True),
 ]
+
+
+def badge_view(conn, got):
+    """got = {badge id: day earned}. Adds rarity, XP, and how many people hold each badge (secret ones stay hidden until earned)."""
+    total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    held = {r["id"]: r["n"] for r in q(conn, "SELECT id, COUNT(*) n FROM badges GROUP BY id")}
+    out = []
+    for bid, emoji, name, desc, rar, _fn, secret in BADGES:
+        hide = secret and bid not in got
+        out.append({"id": bid, "emoji": "❓" if hide else emoji, "name": "???" if hide else name, "desc": "Secret badge" if hide else desc,
+                    "rarity": rar, "rname": RARITY[rar][0], "xp": RARITY[rar][1], "secret": secret,
+                    "got": bid in got, "day": got.get(bid), "holders": held.get(bid, 0), "total": total})
+    return out
 
 
 def check_badges(c):
     u = c.user
     s = get_stats(c.conn, u)
     have = {r["id"] for r in q(c.conn, "SELECT id FROM badges WHERE user_id=?", (u["id"],))}
-    for bid, emoji, name, desc, fn in BADGES:
-        if bid not in have and fn(s):
-            c.conn.execute("INSERT OR IGNORE INTO badges(user_id,id,day) VALUES(?,?,?)", (u["id"], bid, iso(today())))
-            award(c, f"badge:{bid}", 50, f"Badge: {name}")
-            c.ev.append({"t": "badge", "emoji": emoji, "name": name, "desc": desc})
-            feed(c, "badge", f"earned {emoji} {name}")
+
+    def grant(bid, emoji, name, desc, rar):
+        c.conn.execute("INSERT OR IGNORE INTO badges(user_id,id,day) VALUES(?,?,?)", (u["id"], bid, iso(today())))
+        have.add(bid)
+        if award(c, f"badge:{bid}", RARITY[rar][1], f"Badge: {name}") or True:
+            c.ev.append({"t": "badge", "emoji": emoji, "name": name, "desc": desc, "xp": RARITY[rar][1], "rarity": RARITY[rar][0]})
+            feed(c, "badge", f"earned {emoji} {name} ({RARITY[rar][0]})")
+
+    for bid, emoji, name, desc, rar, fn, secret in BADGES:
+        if fn and bid not in have and fn(s):
+            grant(bid, emoji, name, desc, rar)
+    if "complete" not in have and all(b[0] in have for b in BADGES if b[0] != "complete"):
+        b = next(x for x in BADGES if x[0] == "complete")
+        grant(b[0], b[1], b[2], b[3], b[4])
 
 
 STREAK_BONUS = {3: 30, 7: 100, 14: 200, 21: 300, 30: 500, 50: 800, 75: 1200, 100: 2000}
@@ -1494,6 +1576,48 @@ def api_crew(c):
             "boss": boss_status, "crown": crown_holder}
 
 
+@route("GET", "/api/profile")
+def api_profile(c):
+    """Public profile of a crew member. Same-crew only. Never exposes DMs, reflections, mood, urges or test scores."""
+    me = c.user
+    if not me["crew_id"]:
+        raise ApiError("Join a crew first", 403)
+    uid = qpi(c, "uid")
+    if not q1(c.conn, "SELECT id FROM users WHERE id=? AND crew_id=?", (uid, me["crew_id"])):
+        raise ApiError("No such member", 404)
+    p = settle(c.conn, uid)
+    t = today()
+    sv, st = streak_view(c.conn, p)
+    s = get_stats(c.conn, p)
+    stt = day_stats(c.conn, uid, t - D(400), t)
+    heat = [{"d": iso(t - D(i)), "m": stt.get(iso(t - D(i)), {"total": 0})["total"]} for i in range(83, -1, -1)]
+    ws0 = wstart(t)
+    weeks = [c.conn.execute("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day BETWEEN ? AND ?",
+                            (uid, iso(ws0 - D(7 * i)), iso(ws0 - D(7 * i) + D(6)))).fetchone()[0] for i in range(7, -1, -1)]
+    sub30 = {}
+    for i in range(30):
+        for sj, m in stt.get(iso(t - D(i)), {"sub": {}})["sub"].items():
+            sub30[sj] = sub30.get(sj, 0) + m
+    meta = {b[0]: b for b in BADGES}
+    order = {"M": 0, "L": 1, "E": 2, "R": 3, "C": 4}
+    shelf = []
+    for r in q(c.conn, "SELECT id, day FROM badges WHERE user_id=?", (uid,)):
+        b = meta.get(r["id"])
+        if b:
+            shelf.append({"id": b[0], "emoji": b[1], "name": b[2], "desc": b[3], "rarity": b[4], "rname": RARITY[b[4]][0], "day": r["day"]})
+    shelf.sort(key=lambda x: (order[x["rarity"]], x["day"] or ""))
+    duels = q1(c.conn, "SELECT COUNT(*) n, COALESCE(SUM(winner=?),0) w FROM duels WHERE status='done' AND (a=? OR b=?)", (uid, uid, uid))
+    live = q1(c.conn, "SELECT subject, mode FROM timers WHERE user_id=?", (uid,))
+    recent = q(c.conn, "SELECT ts, text FROM feed WHERE user_id=? AND kind<>'join' ORDER BY id DESC LIMIT 8", (uid,))
+    return {"user": {"id": p["id"], "display": p["display"], "emoji": p["emoji"], "color": p["color"], "identity": p["identity"], "me": uid == me["id"]},
+            "level": level_info(total_xp(c.conn, uid)), "streak": {"now": sv["now"], "longest": max(p["longest"], sv["now"])},
+            "live": live, "today_min": st["total"],
+            "stats": {"hours": round(s["minutes"] / 60, 1), "xp": total_xp(c.conn, uid), "best_day": s["best_day"], "best_session": s["best_session"],
+                      "deep": s["deep"], "floor_days": sum(1 for v in stt.values() if qualifies(v, p["daily_min"])), "sessions": s["sessions"]},
+            "heat": heat, "weeks": weeks, "sub30": sub30, "badges": shelf, "badge_total": len(BADGES),
+            "duels": {"played": duels["n"], "won": duels["w"]}, "recent": recent}
+
+
 @route("POST", "/api/react")
 def api_react(c):
     fid = need(c, "feed_id", int)
@@ -1723,7 +1847,7 @@ def api_insights(c):
             "evidence": {"hours": round(s["minutes"] / 60, 1), "sessions": s["sessions"], "deep": s["deep"], "longest": max(u["longest"], u["run"]),
                          "days_hit": qdays, "revs": s["revs"], "urges_won": s["urges_won"], "tests": s["tests"], "mastered": s["mastered"],
                          "learned": s["learned"], "wins": wins},
-            "badges": [{"id": b[0], "emoji": b[1], "name": b[2], "desc": b[3], "got": b[0] in badges, "day": badges.get(b[0])} for b in BADGES],
+            "badges": badge_view(c.conn, badges),
             "level": level_info(total_xp(c.conn, uid)), "xp_log": q(c.conn, "SELECT day, label, amount FROM xp WHERE user_id=? ORDER BY id DESC LIMIT 15", (uid,))}
 
 

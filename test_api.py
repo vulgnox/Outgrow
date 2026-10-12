@@ -270,6 +270,14 @@ try:
     check("profile needs login", Client().call("GET", f"/api/profile?uid={A_ID}")[0] == 401)
     check("own profile flagged me", a.call("GET", f"/api/profile?uid={A_ID}")[1]["user"]["me"] is True)
 
+    # standing strip + rank-change feed event
+    s, r = f.call("GET", "/api/today")
+    sd = r["standing"]
+    check("standing in today", s == 200 and sd and 1 <= sd["rank"] <= sd["of"] and (sd["rank"] == 1 or sd["up"]["gap"] >= 0), sd)
+    s, r = f.call("POST", "/api/focus", {"subject": "Physics", "minutes": 180})
+    feed_kinds = [x["kind"] for x in f.call("GET", "/api/crew")[1]["feed"]]
+    check("overtake posts a rank event", "rank" in feed_kinds, feed_kinds[:8])
+
     # admin
     s, r = a.call("GET", "/api/admin/stats"); check("admin stats", s == 200 and r["app"]["users"] >= 4 and "rss_mb" in r["server"] and r["app"]["messages_total"] > 0, r)
     check("non-admin blocked from stats", b.call("GET", "/api/admin/stats")[0] == 403)

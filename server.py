@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS nudges(id INTEGER PRIMARY KEY, from_id INTEGER, to_id
 CREATE TABLE IF NOT EXISTS duels(id INTEGER PRIMARY KEY, crew_id INTEGER, a INTEGER, b INTEGER, days INTEGER, start TEXT, end TEXT, status TEXT, winner INTEGER);
 CREATE TABLE IF NOT EXISTS boss_battles(id INTEGER PRIMARY KEY, crew_id INTEGER, day TEXT, target_min INTEGER, actual_min INTEGER, passed INTEGER, UNIQUE(crew_id, day));
 CREATE TABLE IF NOT EXISTS chests(user_id INTEGER, day TEXT, reward TEXT, PRIMARY KEY(user_id, day));
+CREATE TABLE IF NOT EXISTS crew_rank(crew_id INTEGER PRIMARY KEY, week TEXT, order_ids TEXT);
 CREATE TABLE IF NOT EXISTS badges(user_id INTEGER, id TEXT, day TEXT, PRIMARY KEY(user_id, id));
 CREATE TABLE IF NOT EXISTS legacy(username TEXT, day TEXT, done INTEGER, total INTEGER);
 CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, thread TEXT NOT NULL, sender INTEGER NOT NULL, recip INTEGER, ts TEXT, body TEXT, deleted INTEGER DEFAULT 0);
@@ -703,6 +704,30 @@ def evaluate(c):
         team_goal(c)
         check_boss_battle(c)
         resolve_duels(c)
+        rank_check(c)
+
+
+def rank_check(c):
+    """Weekly-league rank changes: when someone passes someone else (strictly more XP), post it to the crew feed."""
+    cid = c.user["crew_id"]
+    ws = iso(wstart(today()))
+    mem = [m["id"] for m in q(c.conn, "SELECT id FROM users WHERE crew_id=? ORDER BY id", (cid,))]
+    if len(mem) < 2:
+        return
+    xp = {m: grind(c.conn, m, ws) for m in mem}
+    order = sorted(mem, key=lambda m: (-xp[m], m))
+    row = q1(c.conn, "SELECT week, order_ids FROM crew_rank WHERE crew_id=?", (cid,))
+    old = [m for m in json.loads(row["order_ids"]) if m in xp] if row and row["week"] == ws else None
+    if old is not None and old != order:
+        for m in order:
+            if m not in old or order.index(m) >= old.index(m):
+                continue
+            passed = [x for x in old[:old.index(m)] if order.index(x) > order.index(m) and xp[m] > xp[x]]
+            if passed:
+                v = q1(c.conn, "SELECT display FROM users WHERE id=?", (passed[-1],))
+                feed(c, "rank", f"overtook {v['display']} for #{order.index(m) + 1} in this week's league", uid=m)
+    if old != order:
+        c.conn.execute("INSERT OR REPLACE INTO crew_rank(crew_id, week, order_ids) VALUES(?,?,?)", (cid, ws, json.dumps(order)))
 
 
 def team_goal(c):
@@ -992,6 +1017,7 @@ def api_today(c):
     # Rival info for today screen
     rival_info = None
     boss_info = None
+    standing = None
     if u["crew_id"]:
         crew = q1(c.conn, "SELECT * FROM crews WHERE id=?", (u["crew_id"],))
         if crew:
@@ -1004,6 +1030,12 @@ def api_today(c):
                     week_xp[m["id"]] = grind(c.conn, m["id"], iso(ws))
                 sorted_mem = sorted(mem, key=lambda m: week_xp[m["id"]], reverse=True)
                 me_i = next(i for i, m in enumerate(sorted_mem) if m["id"] == uid)
+                nm = lambda i: q1(c.conn, "SELECT display, emoji FROM users WHERE id=?", (sorted_mem[i]["id"],))
+                up = nm(me_i - 1) if me_i > 0 else None
+                dn = nm(me_i + 1) if me_i + 1 < len(sorted_mem) else None
+                standing = {"rank": me_i + 1, "of": len(sorted_mem), "xp": week_xp[uid],
+                            "up": {"name": up["display"], "gap": week_xp[sorted_mem[me_i - 1]["id"]] - week_xp[uid]} if up else None,
+                            "down": {"name": dn["display"], "gap": week_xp[uid] - week_xp[sorted_mem[me_i + 1]["id"]]} if dn else None}
                 if me_i > 0:
                     rival = q1(c.conn, "SELECT display, emoji FROM users WHERE id=?", (sorted_mem[me_i - 1]["id"],))
                     rival_info = {"name": rival["display"], "emoji": rival["emoji"], "gap": week_xp[sorted_mem[me_i - 1]["id"]] - week_xp[uid]}
@@ -1030,7 +1062,7 @@ def api_today(c):
         "banners": banners, "live": live, "exams": exams,
         "sessions": q(c.conn, "SELECT id, subject, minutes, kind, hour FROM focus WHERE user_id=? AND day=? ORDER BY id DESC", (uid, ts)),
         "reflected": bool(q1(c.conn, "SELECT id FROM reflections WHERE user_id=? AND day=?", (uid, ts))),
-        "rival": rival_info, "boss": boss_info, "pomo": pomo_view(c),
+        "rival": rival_info, "standing": standing, "boss": boss_info, "pomo": pomo_view(c),
     }
 
 

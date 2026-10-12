@@ -480,7 +480,10 @@ function vToday() {
 
   /* competition pulse: rival gap, daily boss, who is live */
   let p = '';
-  if (T.rival) {
+  if (T.standing) {
+    const g = T.standing, top = g.rank === 1;
+    p += `<div class="prow"><span class="pl">#${g.rank} of ${g.of}</span><span>${top ? `Defending the crown${g.down ? `: <b>${esc(g.down.name)}</b> is <b>${g.down.gap} XP</b> behind` : ''}.` : `<b>${g.up.gap} XP</b> behind <b>${esc(g.up.name)}</b>. One deep block closes the gap.`}${!top && g.down && g.down.gap <= 150 ? ` <span class="mut">${esc(g.down.name)} is ${g.down.gap} XP behind you.</span>` : ''}</span></div>`;
+  } else if (T.rival) {
     const ahead = !T.rival.dir;
     p += `<div class="prow"><span class="pl">${ahead ? 'Chasing' : 'Defending'}</span><span><b>${esc(T.rival.name)}</b> ${esc(T.rival.emoji)} is <b>${T.rival.gap} XP</b> ${ahead ? 'ahead of you' : 'behind you'} this week.${ahead ? ' One deep block closes the gap.' : ''}</span></div>`;
   }

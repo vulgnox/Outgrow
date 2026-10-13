@@ -11,6 +11,19 @@ const SUBS = ['Physics', 'Chemistry', 'Maths', 'English', 'Other'];
 const SCOL = { Physics: '#5aa9ff', Chemistry: '#34d3a0', Maths: '#f0b84a', English: '#f0709a', Other: '#9a9aa8' };
 const XPM = 2;                      // XP per verified minute (mirrors the server)
 const MS = [[25, 40, '25 min block'], [50, 100, 'Deep block'], [90, 220, 'Elite block'], [120, 400, 'Marathon'], [180, 800, 'Beast mode'], [240, 1600, 'Legend']];
+/* rank system: 12 tiers, SVG emblems (shield + chevrons), tier colours. The server decides the tier; the client only draws it. */
+const TIERS = ['Sleepwalker', 'Spark', 'Grinder', 'Locked In', 'Iron Habit', 'Night Blade', 'Warlord', 'Rank Reaper', 'Apex', 'Phantom', 'Titan', 'RAGDAMAXED'];
+const TIER_COL = ['#7d7d8a', '#9db4ff', '#4fd1a5', '#5aa9ff', '#b4b8c6', '#9b7cff', '#f0a63c', '#ff6b6b', '#ff8a4c', '#c9a8ff', '#f5c451', '#ffffff'];
+const tierIdx = r => Math.max(0, TIERS.indexOf(r));
+const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+const fxOn = () => { try { return JSON.parse(localStorage.getItem('rg_fx')) !== false; } catch (e) { return true; } };
+function emblem(rank, size = 28, cls = '') {
+  const i = tierIdx(rank), c = TIER_COL[i], n = 1 + Math.min(Math.floor(i / 3), 3);
+  let ch = '';
+  for (let k = 0; k < n; k++) { const y = 23 - ((n - 1) * 7) / 2 + k * 7 - 3; ch += `<path d="M15.5 ${y.toFixed(1)}L24 ${(y + 7.5).toFixed(1)}L32.5 ${y.toFixed(1)}" fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`; }
+  const top = i >= 9 ? `<path d="M17 6.5l3.5 3 3.5-4.5 3.5 4.5 3.5-3" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="em ${i >= 7 ? 'glow' : ''} ${cls}" width="${size}" height="${size}" viewBox="0 0 48 48" style="--tc:${c}" role="img" aria-label="${esc(rank)}"><path d="M24 3 42 10v14c0 10-8 17-18 21C14 41 6 34 6 24V10z" fill="${c}" fill-opacity=".13" stroke="${c}" stroke-width="2.2" stroke-linejoin="round"/>${top}${ch}</svg>`;
+}
 const RING = 590.6;                 // circumference of the r=94 timer ring
 
 const PREF = {
@@ -76,6 +89,7 @@ function toast(t, sub = '', cls = '') {
   setTimeout(() => d.remove(), 3500);
 }
 function confetti() {
+  if (reduced()) return;
   const cols = ['#7c6af7', '#a99cff', '#3dd6a0', '#f2b441', '#ececf1'];
   for (let i = 0; i < 30; i++) {
     const s = document.createElement('i'); s.className = 'confetti';
@@ -85,6 +99,7 @@ function confetti() {
 }
 let _ac = null;
 function beep() {
+  if (!fxOn()) return;
   try {
     _ac = _ac || new (window.AudioContext || window.webkitAudioContext)();
     if (_ac.state === 'suspended') _ac.resume();
@@ -103,8 +118,8 @@ function handleEvents(evs) {
   evs.filter(e => e.t === 'badge').forEach(e => { toast(`${e.emoji} ${e.name}`, `${e.rarity || ''} · +${e.xp || 0} XP · ${e.desc}`, 'badge'); confetti(); });
   const lu = evs.find(e => e.t === 'levelup');
   if (lu) {
-    confetti();
-    modal(`<div class="c lvl"><div class="xs mut up">LEVEL UP</div><div class="bignum">${lu.level}</div><div class="lvl-emo">${esc(lu.emoji || '')}</div><h2>${esc(lu.rank)}</h2>${lu.new_title ? '<div class="pill mt8">New title unlocked</div>' : ''}<p class="sm mut mt12">Another vote for the person you're becoming.</p><button class="btn-p btn-xl mt12" data-act="closeModal">Keep going</button></div>`);
+    confetti(); if (fxOn() && navigator.vibrate) navigator.vibrate([60, 40, 140]);
+    modal(`<div class="c lvl"><div class="xs mut up">LEVEL UP</div><div class="bignum">${lu.level}</div><div class="lvl-em">${emblem(lu.rank, 96)}</div><h2>${esc(lu.rank)}</h2>${lu.new_title ? '<div class="pill mt8">New title unlocked</div>' : ''}<p class="sm mut mt12">Another vote for the person you're becoming.</p><button class="btn-p btn-xl mt12" data-act="closeModal">Keep going</button></div>`);
   }
 }
 function modal(html, lock) {
@@ -117,19 +132,69 @@ function closeModal() {
 }
 const modalOpen = () => !$('#modal').classList.contains('hidden');
 
+/* in-app bottom sheet (replaces confirm()/prompt()). Lives on top of #modal and works inside native fullscreen. */
+function sheet(html) {
+  return new Promise(res => {
+    $('#cfm')?.remove();
+    const o = document.createElement('div'); o.id = 'cfm'; o.setAttribute('role', 'alertdialog'); o.setAttribute('aria-modal', 'true');
+    o.innerHTML = `<div>${html}</div>`;
+    const onKey = e => { if (e.key === 'Escape') done(null); };
+    const done = v => { o.remove(); document.removeEventListener('keydown', onKey); res(v); };
+    o.addEventListener('click', e => {
+      const cp = e.target.closest('[data-copy]'); if (cp) { try { navigator.clipboard?.writeText(cp.dataset.copy); toast('Copied'); } catch (x) { } return; }
+      const b = e.target.closest('[data-c]'); if (b) done(b.dataset.c); else if (e.target === o) done(null);
+    });
+    document.addEventListener('keydown', onKey);
+    (document.fullscreenElement || document.body).appendChild(o);
+    (o.querySelector('[data-c="1"]') || o.querySelector('[data-c]'))?.focus();
+  });
+}
+const confirmSheet = async (msg, ok = 'Confirm', danger = false) => (await sheet(`<p class="b">${esc(msg)}</p><div class="row g8 mt12"><button class="btn-lg grow" data-c="0">Cancel</button><button class="${danger ? 'btn-d' : 'btn-p'} btn-lg grow" data-c="1">${esc(ok)}</button></div>`)) === '1';
+const pinSheet = (user, pin) => sheet(`<h2>New PIN for @${esc(user)}</h2><div class="bignum sm c mt12 num" style="letter-spacing:.14em">${esc(pin)}</div><p class="sm mut c mt8">Send it to them privately. They have been logged out.</p><div class="row g8 mt12"><button class="btn-lg grow" data-copy="${esc(pin)}">Copy</button><button class="btn-p btn-lg grow" data-c="1">Done</button></div>`);
+
+/* numbers that count up when they grow. The markup already holds the final value, so nothing flashes. */
+function runCounts() {
+  S.cu = S.cu || {};
+  $$('[data-count]').forEach(el => {
+    const to = +el.dataset.count, k = el.dataset.ck, from = S.cu[k], pre = el.dataset.pre || '', suf = el.dataset.suf || '';
+    S.cu[k] = to;
+    if (from == null || from >= to || reduced()) return;
+    const t0 = performance.now(), fmt = v => pre + Math.round(v).toLocaleString() + suf;
+    const step = now => { const p = Math.min((now - t0) / 700, 1); el.textContent = fmt(from + (to - from) * (1 - Math.pow(1 - p, 3))); if (p < 1 && el.isConnected) requestAnimationFrame(step); };
+    el.textContent = fmt(from); requestAnimationFrame(step);
+  });
+}
+/* time left before the 3 AM rollover (device clock; the server day is IST) */
+function streakLeft() { const n = new Date(), d = new Date(n); d.setHours(3, 0, 0, 0); if (d <= n) d.setDate(d.getDate() + 1); const m = Math.round((d - n) / 60000); return `${Math.floor(m / 60)}h ${pad(m % 60)}m left`; }
+const DMS = [[60, '1h', 50], [120, '2h', 120], [240, '4h', 300], [360, '6h', 600], [480, '8h', 1200], [600, '10h', 1500], [720, '12h', 2500]];
+function dayTrack(vm) {
+  const next = DMS.find(d => vm < d[0]), shown = DMS.filter((d, i) => i < 5 || vm >= DMS[i - 1][0]), max = shown[shown.length - 1][0];
+  return `<div class="lbl2">Day milestones · verified time</div><div class="mtr"><div class="bar g"><i style="width:${clamp(vm / max * 100, 0, 100)}%"></i></div>${shown.map(d => `<span class="mk ${vm >= d[0] ? 'on' : ''}" style="left:${d[0] / max * 100}%"></span><span class="ml ${vm >= d[0] ? 'on' : ''}" style="left:${d[0] / max * 100}%">${d[1]}</span>`).join('')}</div>
+    <div class="xs mut">${next ? `Next: ${next[1]} for +${next[2].toLocaleString()} XP · ${fm(next[0] - vm)} to go` : 'Every milestone hit today.'}</div>`;
+}
+const skeleton = () => '<div class="sk" aria-hidden="true"><i style="height:132px"></i><i style="height:92px"></i><i style="height:168px"></i><i style="height:92px"></i></div>';
+/* end-of-block summary: what the block was worth */
+function sessionSummary(r) {
+  if (!r || r.discarded || r.too_short || !(r.minutes >= 5) || modalOpen()) return;
+  const xp = (r.events || []).filter(e => e.t === 'xp'), sum = xp.reduce((a, e) => a + e.amount, 0);
+  modal(`<div class="c"><div class="xs mut up">Block logged</div><div class="bignum">${fm(r.minutes)}</div><div class="good b mt4">+${sum.toLocaleString()} XP</div></div>
+    <div class="mt12">${xp.map(e => `<div class="row between sm" style="padding:4px 0"><span class="mut">${esc(e.label)}</span><b class="num">${e.amount > 0 ? '+' : ''}${e.amount}</b></div>`).join('')}</div>
+    <button class="btn-p btn-xl mt12" data-act="closeModal">Done</button>`);
+}
+
 /* ---------- profile sheet (same-crew, public stats only) ---------- */
 async function profileOpen(id) {
   let P; try { P = await api('profile?uid=' + id); } catch (e) { return; }
   const u = P.user, L = P.level, s = P.stats, st = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
   const hm = P.heat.map(c => `<i title="${esc(c.d)}: ${fm(c.m)}" style="background:${c.m === 0 ? '#17171c' : `rgba(124,106,247,${Math.min(.25 + c.m / 240 * .75, 1)})`}"></i>`).join('');
   const subTot = Object.values(P.sub30).reduce((a, b) => a + b, 0);
-  modal(`<div class="row g8">${avatar(u.emoji, u.color)}<div class="grow"><h2>${esc(u.display)}${u.me ? ' <span class="you">you</span>' : ''}</h2>
-      <div class="xs mut">Lv ${L.level} ${esc(L.emoji)} ${esc(L.rank)} · ${P.streak.now}-day streak${P.live ? ` · <span class="live-t">live: ${esc(P.live.subject)}</span>` : ''}</div></div></div>
+  modal(`<div class="row g8">${avatar(u.emoji, u.color, 'lg', L.rank)}<div class="grow"><h2>${esc(u.display)}${u.me ? ' <span class="you">you</span>' : ''}</h2>
+      <div class="rankline">${emblem(L.rank, 16)}<span>${esc(L.rank)}</span><span class="mut">· Lv ${L.level}</span></div><div class="xs mut">${P.streak.now}-day streak${P.live ? ` · <span class="live-t">live: ${esc(P.live.subject)}</span>` : ''}</div></div></div>
     ${u.identity ? `<div class="quote">I am ${esc(u.identity)}</div>` : ''}
     <div class="bar thin mt8"><i style="width:${L.pct}%"></i></div><div class="xs mut">${L.xp.toLocaleString()} XP</div>
     <div class="grid3 mt8">${st(s.hours + 'h', 'focused')}${st(P.streak.longest, 'best streak')}${st(s.floor_days, 'floor days')}${st(fm(s.best_day), 'best day')}${st(fm(s.best_session), 'best sitting')}${st(s.deep, 'deep blocks')}</div>
     <div class="lbl2 mt8">Trophy shelf · ${P.badges.length}/${P.badge_total}</div>
-    ${P.badges.length ? `<div class="grid3">${P.badges.map(b => `<div class="badge r-${b.rarity}" title="${esc(b.desc)}"><s>${esc(b.emoji)}</s><b>${esc(b.name)}</b><div class="rar">${esc(b.rname)}</div><div class="xs mut">${esc(b.day || '')}</div></div>`).join('')}</div>` : '<div class="mut sm">No badges yet.</div>'}
+    ${P.badges.length ? `<div class="grid3">${P.badges.map(b => `<div class="badge r-${b.rarity}" title="${esc(b.desc)}"><s><i>${esc(b.emoji)}</i></s><b>${esc(b.name)}</b><div class="rar">${esc(b.rname)}</div><div class="xs mut">${esc(b.day || '')}</div></div>`).join('')}</div>` : '<div class="mut sm">No badges yet.</div>'}
     <div class="lbl2 mt8">Last 12 weeks</div><div class="heat">${hm}</div>
     <div class="lbl2 mt8">Weekly hours</div>${bars(P.weeks, '#7c6af7')}
     ${subTot ? `<div class="lbl2 mt8">Subjects, 30 days</div>${Object.entries(P.sub30).sort((a, b) => b[1] - a[1]).map(([k, m]) => `<div class="row g8" style="margin:5px 0"><span class="sm" style="width:78px">${esc(k)}</span><div class="bar thin grow"><i style="width:${m / subTot * 100}%;background:${SCOL[k] || '#9aa0b4'}"></i></div><span class="xs mut">${fm(m)}</span></div>`).join('')}` : ''}
@@ -155,7 +220,7 @@ function lines(series, h = 60) {
 const lbl = (t, right = '') => `<div class="lbl"><span>${t}</span>${right ? `<span class="rt">${right}</span>` : ''}</div>`;
 const seg = (items, cur, act) => `<div class="seg">${items.map(([k, n]) => `<button class="${cur === k ? 'on' : ''}" data-act="${act}" data-v="${esc(k)}">${n}</button>`).join('')}</div>`;
 const ago = ts => { const s = (Date.now() - new Date(ts).getTime()) / 1000; if (s < 90) return 'now'; if (s < 3600) return Math.floor(s / 60) + 'm'; if (s < 86400) return Math.floor(s / 3600) + 'h'; return Math.floor(s / 86400) + 'd'; };
-const avatar = (emo, col, cls = '') => `<div class="av ${cls}" style="background:${esc(col)}22;border-color:${esc(col)}">${esc(emo)}</div>`;
+const avatar = (emo, col, cls = '', rank = null) => { const i = rank == null ? -1 : tierIdx(rank); return `<div class="av ${cls}${i >= 3 ? ' fr' : ''}" style="background:${esc(col)}22;border-color:${esc(col)}${i >= 3 ? `;--tc:${TIER_COL[i]}` : ''}">${esc(emo)}</div>`; };
 
 /* ---------- auth ---------- */
 function renderAuth() {
@@ -163,9 +228,10 @@ function renderAuth() {
   $('#app').innerHTML = `<div class="auth"><div class="logo">RAGDAMAXING</div>
   <p class="tag">Outwork the old you. Track it, prove it, together.</p>
   <div class="card col">
+    ${reg && S.joinCode ? '<div class="note" style="margin:0">You were invited. Pick a username and PIN to join the crew.</div>' : ''}
     <input id="a_user" placeholder="Username" autocapitalize="off" autocomplete="username" spellcheck="false">
     <input id="a_pin" type="password" placeholder="PIN or password (4+ characters)" autocomplete="${reg ? 'new-password' : 'current-password'}">
-    ${reg ? `<input id="a_code" placeholder="Crew invite code" autocapitalize="characters" spellcheck="false"><div class="mut xs c">or start your own</div><input id="a_cname" placeholder="New crew name">` : ''}
+    ${reg ? `<input id="a_code" placeholder="Crew invite code" autocapitalize="characters" spellcheck="false" value="${esc(S.joinCode || '')}"><div class="mut xs c">or start your own</div><input id="a_cname" placeholder="New crew name">` : ''}
     <button class="btn-p btn-xl" data-act="${reg ? 'register' : 'login'}">${reg ? 'Join the grind' : 'Log in'}</button>
     <button class="btn-text" data-act="authMode">${reg ? 'I already have an account' : 'New here? Create an account'}</button>
   </div></div>`;
@@ -189,6 +255,7 @@ async function loadTab(tab) {
 async function go(tab) {
   const changed = tab !== S.tab, seq = ++_navSeq;
   S.tab = tab; chatStop(); if (tab === 'chat') CH.open = null;
+  if (changed && S.user) { stopTick(); $('.fab')?.remove(); $('#app').innerHTML = skeleton(); ensureNav(); }
   try { await loadTab(tab); } catch (e) { if (e.message === 'login') return; }
   if (seq !== _navSeq) return;
   render(); if (changed) window.scrollTo(0, 0);
@@ -203,7 +270,7 @@ async function refresh() {
 function ensureNav() {
   let nav = $('.nav');
   if (!nav) {
-    nav = document.createElement('nav'); nav.className = 'nav';
+    nav = document.createElement('nav'); nav.className = 'nav'; nav.setAttribute('aria-label', 'Main');
     nav.innerHTML = '<div>' + TABS.map(t => `<button data-act="tab" data-v="${t[0]}">${ic(t[1], 21)}<span>${t[2]}</span></button>`).join('') + '</div>';
     document.body.appendChild(nav);
   }
@@ -217,7 +284,10 @@ function render() {
   let v;
   try { v = views[S.tab](); }
   catch (e) { console.error(e); v = '<section class="card c"><div class="b">This tab hit a snag.</div><p class="sm mut">Reload to try again.</p><button class="btn-s" data-act="reload">Reload</button></section>'; }
+  const flip = S.tab === 'crew' && !reduced() ? new Map($$('.lb[data-uid]').map(e => [e.dataset.uid, e.getBoundingClientRect().top])) : null;
   $('#app').innerHTML = v;
+  if (flip) $$('.lb[data-uid]').forEach(e => { const p = flip.get(e.dataset.uid); if (p == null) return; const d = p - e.getBoundingClientRect().top; if (Math.abs(d) > 2) e.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: 420, easing: 'cubic-bezier(.2,.8,.2,1)' }); });
+  runCounts();
   $('.fab')?.remove();
   if (S.tab === 'today' && S.today && !S.fs) { const f = document.createElement('button'); f.className = 'fab'; f.dataset.act = 'urge'; f.textContent = "I'm tempted"; document.body.appendChild(f); }
   openK.forEach(k => { const d = document.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; });
@@ -233,6 +303,8 @@ function sendOpen() { if (S.user) fetch('/api/open', { method: 'POST', headers: 
 document.addEventListener('visibilitychange', () => { if (document.hidden) S._hid = Date.now(); else if (S._hid && Date.now() - S._hid > 120000 && !(S.today && S.today.timer)) sendOpen(); });
 const fsec = s => s == null ? '–' : s < 90 ? `${Math.round(s)}s` : `${(s / 60).toFixed(1)}m`;
 function thinkToast(r) { if (r && r.think_s != null) toast(`Started in ${fsec(r.think_s)}`, r.think_s <= 60 ? 'No hesitation. That is the whole game.' : 'Time from opening the app to starting a block.'); }
+const _jm = /^\/join\/([A-Za-z0-9]{4,12})\/?$/.exec(location.pathname);
+if (_jm) { S.joinCode = _jm[1].toUpperCase(); S.authMode = 'register'; try { history.replaceState(null, '', '/'); } catch (e) { } }
 async function boot() {
   try { const me = await api('me'); S.user = me.user; sendOpen(); await go(S.tab); if (!S.user.onboarded) onboard(); }
   catch (e) { if (!S.user) renderAuth(); }
@@ -295,7 +367,7 @@ function paintTimer(st) {
   const rg = $('#ringc'); if (rg) rg.style.strokeDashoffset = RING * (1 - frac);
   const sub = st.kind === 'stopwatch' ? `${mins} min · ${mins * XPM} XP banked`
     : st.kind === 'break' ? `Block ${st.po.block} of ${st.po.blocks} done`
-      : st.rem < 0 ? 'Overtime · bonus focus' : `${mins} min in${st.po ? ` · block ${st.po.block} of ${st.po.blocks}` : ''}`;
+      : st.rem < 0 ? 'Overtime · bonus focus' : `${mins} min in · ${mins * XPM} XP${st.po ? ` · block ${st.po.block} of ${st.po.blocks}` : ''}`;
   const ts = $('#tsub'); if (ts) ts.textContent = sub;
   const [mk, mh] = timerMsg(st, mins);
   if (mk !== S.msgKey) { S.msgKey = mk; const tmg = $('#tmsg'); if (tmg) tmg.innerHTML = mh; }
@@ -319,6 +391,7 @@ async function finishTimer(body) {
   try { setToday(await api('today')); } catch (e) { }
   exitFullscreenFocus(true);
   render();
+  sessionSummary(r);
   return r;
 }
 
@@ -424,6 +497,16 @@ function pomoCalc(c) {
 }
 function pomoPrev() { const c = pomoNorm(S.pomoCfg), p = pomoCalc(c); return `${p.plan.length} block${p.plan.length === 1 ? '' : 's'} · ${c.work} min work · ${c.brk} min break (${p.long} min every ${p.every}) · about ${fm(p.wall)} on the clock`; }
 /* ---------- TODAY ---------- */
+/* one decision-free card: the server already knows your weakest subject, so just point at it */
+function doNow() {
+  const T = S.today, wk = (T.quests || []).find(q => q.id === 'weak'), mm = wk && /Weakest link:?\s*(\w+)/i.exec(wk.text);
+  const weakOpen = !!(wk && !wk.done && mm && SUBS.includes(mm[1]));
+  const sub = weakOpen ? mm[1] : S.pickSub, gap = T.daily_min - T.today.total, dur = gap > 30 ? 50 : gap > 0 ? 25 : 50;
+  const why = weakOpen ? 'Your weakest subject this week.' : gap > 0 ? `${gap} min to your floor. Protect the streak.` : 'Floor hit. Stack more verified minutes.';
+  return `<section class="card hero donow">${lbl('Do this now')}<div class="row g8"><i class="sd" style="background:${SCOL[sub]}"></i><div class="dn-t">${esc(sub)} <span class="mut">· ${dur} min</span></div></div><div class="sm mut mt4">${esc(why)}</div>
+    <button class="btn-p btn-xl mt12" data-act="startSuggest" data-sub="${esc(sub)}" data-dur="${dur}">Start now</button>
+    <button class="btn-text" data-act="start5">Can't start? Just 5 minutes. That's the deal.</button></section>`;
+}
 function focusIdle() {
   const mode = S.pickMode, sub = S.pickSub;
   let body, label;
@@ -437,14 +520,13 @@ function focusIdle() {
       <div class="sm mut mt8" id="pomo_prev">${pomoPrev()}</div>`;
     label = `Start pomodoro · ${fm(pomoNorm(c).total)}`;
   }
-  return `<section class="card focus">${lbl('Focus')}
+  return doNow() + `<section class="card focus"><details data-k="focuscfg"><summary>Customize your block</summary>
     <div class="chips">${SUBS.map(s => `<button class="chip ${sub === s ? 'on' : ''}" data-act="pickSub" data-v="${s}"><i class="sd" style="background:${SCOL[s]}"></i>${s}</button>`).join('')}</div>
     <div class="mt12">${seg([['timer', 'Timer'], ['stopwatch', 'Stopwatch'], ['pomo', 'Pomodoro']], mode, 'pickMode')}</div>
     <div class="mt12">${body}</div>
     <button class="btn-p btn-xl mt12" data-act="${mode === 'pomo' ? 'startPomo' : 'startTimer'}">${esc(label)}</button>
-    <button class="btn-text" data-act="start5">Can't start? Just 5 minutes. That's the deal.</button>
     <details data-k="manual"><summary>Studied offline? Log it (half XP)</summary>
-      <div class="row g8 mt8"><select id="mf_s">${SUBS.map(s => `<option ${s === sub ? 'selected' : ''}>${s}</option>`).join('')}</select><input id="mf_m" type="number" inputmode="numeric" placeholder="min" style="width:96px"><button data-act="manual">Log</button></div></details></section>`;
+      <div class="row g8 mt8"><select id="mf_s">${SUBS.map(s => `<option ${s === sub ? 'selected' : ''}>${s}</option>`).join('')}</select><input id="mf_m" type="number" inputmode="numeric" placeholder="min" style="width:96px"><button data-act="manual">Log</button></div></details></details></section>`;
 }
 function ringSvg(col) {
   return `<div class="ring"><svg width="210" height="210" viewBox="0 0 210 210"><circle class="rt" cx="105" cy="105" r="94" fill="none" stroke-width="10"/><circle id="ringc" class="rp" cx="105" cy="105" r="94" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${RING}" stroke-dashoffset="${RING}"/></svg>
@@ -458,7 +540,7 @@ function focusRun(st) {
     ${ringSvg(col)}
     ${po ? `<div class="xs mut c">${fm(po.done)} of ${fm(po.total)} done · long break every ${po.every} blocks</div>` : ''}
     <div class="tmsg" id="tmsg"></div>
-    <div class="row g8 center mt8"><button class="btn-s" data-act="distract">Lost focus · <span id="dcount">${tm.distractions}</span></button><button class="btn-s" data-act="enterFullscreenFocus">${ic('expand', 15)} Fullscreen</button></div>
+    ${S.today.live.length ? `<div class="xs mut c mt8"><span class="dot live"></span> ${S.today.live.map(l => esc(l.display)).join(', ')} locked in with you</div>` : ''}<div class="row g8 center mt8"><button class="btn-s" data-act="distract">Lost focus · <span id="dcount">${tm.distractions}</span></button><button class="btn-s" data-act="enterFullscreenFocus">${ic('expand', 15)} Fullscreen</button></div>
     <div class="row g8 mt12"><button class="btn-g btn-lg grow" data-act="stopTimer">${po ? 'End plan & log' : 'Finish & log'}</button><button class="btn-d btn-lg" data-act="discard">Discard</button></div></section>`;
 }
 function focusBreak(st) {
@@ -474,11 +556,11 @@ function focusBreak(st) {
 function vToday() {
   const T = S.today, L = T.level, sv = T.streak, u = T.user, floor = T.daily_min, m = T.today.total;
   let h = `<section class="card hero">
-    <div class="row between"><div class="row g12">${avatar(u.emoji, u.color, 'lg')}<div><div class="h2">${esc(u.display)}</div><div class="xs mut">Level ${L.level} · ${esc(L.emoji)} ${esc(L.rank)}</div></div></div>
-      <div class="streak ${sv.at_risk ? 'risk' : ''}"><span class="sn">${ic('flame', 20)}${sv.now}</span><span class="xs mut">${sv.at_risk ? 'at risk' : 'day streak'}</span></div></div>
+    <div class="row between"><div class="row g12">${avatar(u.emoji, u.color, 'lg', L.rank)}<div><div class="h2">${esc(u.display)}</div><div class="rankline">${emblem(L.rank, 18)}<span>${esc(L.rank)}</span><span class="mut">· Lv ${L.level}</span></div></div></div>
+      <div class="streak ${sv.at_risk ? 'risk' : ''}"><span class="sn">${ic('flame', 20)}${sv.now}</span><span class="xs mut">${sv.at_risk ? 'at risk · ' + streakLeft() : 'day streak'}</span></div></div>
     <div class="bar xp mt12"><i style="width:${L.pct}%"></i></div>
-    <div class="row between xs mut mt4"><span>${(L.xp - L.lo).toLocaleString()} / ${(L.hi - L.lo).toLocaleString()} XP to level ${L.level + 1}</span><span>+${T.xp_today} today</span></div>
-    <div class="row between xs mut mt4"><span>${L.next_rank ? `Next title · Lv ${L.next_at}: ${esc(L.next_emoji)} ${esc(L.next_rank)}` : 'Top title reached'}</span><span class="row g4">${ic('shield', 13)} ${sv.freezes} freeze${sv.freezes === 1 ? '' : 's'}</span></div>
+    <div class="row between xs mut mt4"><span>${(L.xp - L.lo).toLocaleString()} / ${(L.hi - L.lo).toLocaleString()} XP to level ${L.level + 1}</span><span data-count="${T.xp_today}" data-ck="xpt" data-pre="+" data-suf=" today">+${T.xp_today.toLocaleString()} today</span></div>
+    <div class="row between xs mut mt4"><span>${L.next_rank ? `<span class="row g4">Next · Lv ${L.next_at} ${emblem(L.next_rank, 14)} ${esc(L.next_rank)}</span>` : 'Top title reached'}</span><span class="row g4">${ic('shield', 13)} ${sv.freezes} freeze${sv.freezes === 1 ? '' : 's'}</span></div>
     ${u.identity ? `<div class="quote">I am ${esc(u.identity)}</div>` : ''}
     ${T.exams.length ? `<div class="chips mt8">${T.exams.map(e => `<span class="pill">${esc(e.name)} · ${e.days_left}d</span>`).join('')}</div>` : ''}</section>`;
   T.banners.forEach(b => h += `<div class="note ${esc(b.kind)}">${esc(b.text)}</div>`);
@@ -511,7 +593,7 @@ function vToday() {
     <div class="bar ${m >= floor ? 'g' : ''}"><i style="width:${Math.min(m / stretch * 100, 100)}%"></i><span class="tick" style="left:${floor / stretch * 100}%"></span></div>
     <div class="row between xs mut mt4"><span>${sv.qualified ? 'Floor hit. Streak is safe.' : `Floor ${floor} min · ${Math.max(floor - m, 0)} to go`}</span><span>Old-you bar ${fm(T.stretch_min)}</span></div>
     ${Object.keys(T.today.sub).length ? `<div class="chips mt8">${Object.entries(T.today.sub).map(([s, mm]) => `<span class="pill" style="background:${SCOL[s]}22;color:${SCOL[s]}">${esc(s)} ${fm(mm)}</span>`).join('')}</div>` : ''}
-    <div class="xs mut mt8">A streak day needs ${floor} min, at least half of it on the timer.</div>
+    ${dayTrack(T.today.timer || 0)}<div class="xs mut mt8">A streak day needs ${floor} min, at least half of it on the timer.</div>
     ${T.chest.available ? `<button class="btn-p btn-xl mt12" data-act="chest">Open today's chest</button>` : T.chest.opened ? `<div class="xs mut mt8">Today's chest: <b class="tx">${esc(T.chest.reward)}</b></div>` : ''}
     ${T.sessions.length ? `<div class="lbl2">Blocks today</div>${T.sessions.map(s => `<div class="q"><i class="sd" style="background:${SCOL[s.subject]}"></i><div class="grow">${esc(s.subject)}</div><b class="num">${fm(s.minutes)}</b><span class="xs mut w64">${s.kind === 'timer' ? 'Verified' : 'Manual'}</span>${s.kind === 'manual' ? `<button class="btn-s ico" data-act="delFocus" data-id="${s.id}" aria-label="Remove">${ic('x', 14)}</button>` : ''}</div>`).join('')}` : ''}</section>`;
 
@@ -538,20 +620,26 @@ function vCrew() {
   const gap = meI > 0 ? `${pv(sorted[meI - 1]).xp - pv(me).xp} XP behind <b>${esc(sorted[meI - 1].display)}</b>. One deep block closes it.`
     : sorted.length > 1 ? `Leading by ${pv(me).xp - pv(sorted[1]).xp} XP over <b>${esc(sorted[1].display)}</b>. Don't coast.` : 'Invite friends to start competing.';
   const per = { week: 'This week', month: 'This month', all: 'All time' }[S.crewPeriod];
-  let h = `<section class="card hero"><div class="row between"><div><h2>${esc(C.crew.name)}</h2><div class="xs mut mt4">Invite code <button class="code" data-act="copy" data-v="${esc(C.crew.code)}">${esc(C.crew.code)}</button></div></div>
+  let h = `<section class="card hero"><div class="row between"><div><h2>${esc(C.crew.name)}</h2><div class="xs mut mt4">Invite code <button class="code" data-act="copy" data-v="${esc(C.crew.code)}">${esc(C.crew.code)}</button> <button class="btn-s" data-act="copy" data-v="${esc(location.origin + '/join/' + C.crew.code)}" data-t="Invite link copied">Copy link</button></div></div>
     <div class="c"><div class="xs mut">${per} rank</div><div class="bignum sm">#${meI + 1}<span class="mut of"> / ${sorted.length}</span></div></div></div>
     <div class="sm mt12">${gap}</div>
     ${C.crown ? `<div class="crownline">${ic('crown', 15)}<span><b>${esc(C.crown.name)}</b> ${esc(C.crown.emoji)} held the crown last week with ${C.crown.xp.toLocaleString()} XP</span></div>` : ''}</section>`;
 
+  const dotOf = m => m.live ? '<span class="dot live"></span>' : m.qualified ? '<span class="dot g"></span>' : m.today_min > 0 ? '<span class="dot y"></span>' : '<span class="dot"></span>';
+  const nudgeBtn = m => !m.me && !m.qualified ? `<button class="btn-s nudge" ${m.nudged ? 'disabled' : ''} data-act="nudge" data-id="${m.id}">${m.nudged ? 'Nudged' : 'Nudge'}</button>` : '';
+  const podium = sorted.length >= 3, off = podium ? 3 : 0;
+  const podCell = (m, i) => { const p = pv(m); return `<div class="pod p${i + 1} ${m.me ? 'me' : ''}" data-act="profile" data-id="${m.id}"><div class="pav">${i === 0 ? `<span class="pcrown">${ic('crown', 18)}</span>` : ''}${avatar(m.emoji, m.color, i === 0 ? 'xl' : 'lg', m.level.rank)}</div>
+      <div class="pn ell">${dotOf(m)} ${esc(m.display)}${m.me ? ' <span class="you">you</span>' : ''}</div><div class="xs mut ell row g4 center">${emblem(m.level.rank, 13)}${esc(m.level.rank)}</div>
+      <div class="px num">${p.xp.toLocaleString()}</div><div class="xs mut">XP · ${fm(p.min)}</div>${nudgeBtn(m)}<div class="pbase"><b>${i + 1}</b></div></div>`; };
   h += `<section class="card">${seg([['week', 'Week'], ['month', 'Month'], ['all', 'All time']], S.crewPeriod, 'crewPeriod')}
-    <div class="lbl2">${{ week: "This week's league", month: 'This month', all: 'All-time legends' }[S.crewPeriod]}</div>
-    ${sorted.map((m, i) => {
-    const p = pv(m), dot = m.live ? '<span class="dot live"></span>' : m.qualified ? '<span class="dot g"></span>' : m.today_min > 0 ? '<span class="dot y"></span>' : '<span class="dot"></span>';
-    return `<div class="lb ${m.me ? 'me' : ''}"><div class="rk ${i < 3 ? 'top' + (i + 1) : ''}">${i === 0 ? ic('crown', 16) : i + 1}</div><span data-act="profile" data-id="${m.id}" style="cursor:pointer">${avatar(m.emoji, m.color)}</span>
-      <div class="grow lbm" data-act="profile" data-id="${m.id}" style="cursor:pointer"><div class="lbn"><b class="ell">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dot}</div>
-        <div class="xs mut ell">Lv ${m.level.level} ${esc(m.level.emoji)} ${esc(m.level.rank)} · ${ic('flame', 11)}${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span class="live-t">live: ${esc(m.live.subject)}</span>` : ''}</div>
+    ${podium ? `<div class="podium">${[1, 0, 2].map(i => podCell(sorted[i], i)).join('')}</div>` : `<div class="lbl2">${{ week: "This week's league", month: 'This month', all: 'All-time legends' }[S.crewPeriod]}</div>`}
+    ${sorted.slice(off).map((m, j) => {
+    const i = j + off, p = pv(m);
+    return `<div class="lb ${m.me ? 'me' : ''}" data-uid="${m.id}"><div class="rk">${i + 1}</div><span data-act="profile" data-id="${m.id}" style="cursor:pointer">${avatar(m.emoji, m.color, '', m.level.rank)}</span>
+      <div class="grow lbm" data-act="profile" data-id="${m.id}" style="cursor:pointer"><div class="lbn"><b class="ell">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dotOf(m)}</div>
+        <div class="xs mut ell row g4">${emblem(m.level.rank, 13)}${esc(m.level.rank)} · Lv ${m.level.level} · ${ic('flame', 11)}${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span class="live-t">live: ${esc(m.live.subject)}</span>` : ''}</div>
         <div class="bar thin mt4"><i style="width:${Math.round(p.xp / top * 100)}%;background:${esc(m.color)}"></i></div></div>
-      <div class="lbx"><b class="num">${p.xp.toLocaleString()}</b><div class="xs mut">XP · ${fm(p.min)}</div>${!m.me && !m.qualified ? `<button class="btn-s nudge" ${m.nudged ? 'disabled' : ''} data-act="nudge" data-id="${m.id}">${m.nudged ? 'Nudged' : 'Nudge'}</button>` : ''}</div></div>`;
+      <div class="lbx"><b class="num">${p.xp.toLocaleString()}</b><div class="xs mut">XP · ${fm(p.min)}</div>${nudgeBtn(m)}</div></div>`;
   }).join('')}
     <div class="xs mut mt8"><span class="dot live"></span> live · <span class="dot g"></span> floor hit · <span class="dot y"></span> some work · <span class="dot"></span> nothing yet. A nudge gives you +5 XP. The league resets every Monday.</div></section>`;
 
@@ -662,9 +750,9 @@ function vMe() {
   const I = S.ins, u = S.user, L = I.level, e = I.evidence, og = I.outgrow, pct = Math.round(og.ratio * 100);
   const hm = I.heat.map(c => { const a = c.f ? '#5aa9ff66' : c.m === 0 ? '#17171c' : `rgba(124,106,247,${Math.min(.25 + c.m / 240 * .75, 1)})`; return `<i title="${esc(c.d)}: ${fm(c.m)}${c.f ? ' (freeze)' : ''}" style="background:${a}"></i>`; }).join('');
   const hrmx = Math.max(...I.hours, 1), best = I.hours.indexOf(Math.max(...I.hours));
-  let h = `<section class="card hero"><div class="row g12">${avatar(u.emoji, u.color, 'xl')}<div class="grow"><h2>${esc(u.display)}</h2><div class="mut sm">Level ${L.level} · ${esc(L.emoji)} ${esc(L.rank)} · ${L.xp.toLocaleString()} XP</div></div></div>
+  let h = `<section class="card hero"><div class="row g12">${avatar(u.emoji, u.color, 'xl', L.rank)}<div class="grow"><h2>${esc(u.display)}</h2><div class="rankline">${emblem(L.rank, 18)}<span>${esc(L.rank)}</span><span class="mut">· Level ${L.level} · ${L.xp.toLocaleString()} XP</span></div></div></div>
     <div class="bar xp mt12"><i style="width:${L.pct}%"></i></div>
-    <details data-k="ladder"><summary>Title ladder · ${I.ladder.length} titles · ${L.next_rank ? 'next: ' + esc(L.next_emoji) + ' ' + esc(L.next_rank) + ' at Lv ' + L.next_at : 'top title reached'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .4}"><span class="lad-e">${esc(r.emoji)}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">you</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(r.xp || 0).toLocaleString()} XP</span></div>`).join('')}</details></section>`;
+    <button class="btn-xl mt12" data-act="shareCard">Share my stat card</button><details data-k="ladder"><summary>Title ladder · ${I.ladder.length} titles · ${L.next_rank ? 'next: ' + esc(L.next_rank) + ' at Lv ' + L.next_at : 'top title reached'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .4}"><span class="lad-e">${emblem(r.rank, 26)}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">you</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(r.xp || 0).toLocaleString()} XP</span></div>`).join('')}</details></section>`;
   h += `<section class="card">${lbl('The Ragda meter')}<p class="sm mut">Your last 7 days against the old A+ you (${og.baseline_h}h a day).</p><div class="row between"><div class="bignum" style="color:${pct >= 100 ? 'var(--good)' : 'var(--tx)'}">${pct}%</div><div class="sm rt-text">${pct >= 130 ? 'You are Ragdamaxed. The old you cannot keep up.' : pct >= 100 ? 'You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
     <div class="bar mt8 ${pct >= 100 ? 'g' : ''}"><i style="width:${Math.min(pct, 100)}%"></i></div>
     ${I.ghost ? `<div class="lbl2">You vs your best week</div>${lines([{ v: I.ghost.cum, c: '#7c7c88', d: 1, w: 2 }, { v: I.cum, c: '#3dd6a0', w: 3 }])}<div class="xs mut">Dashed is your best week (${fm(I.ghost.total)}). Green is this week.</div>` : ''}</section>`;
@@ -694,26 +782,50 @@ function vMe() {
   if (I.hours.some(x => x)) h += `<section class="card">${lbl('Your best focus hours')}<div class="hrs">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut mt4"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm mt8">Peak: <b>${best % 12 || 12}${best < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></section>`;
   if (Object.keys(I.sub7).length) { const tot = Object.values(I.sub7).reduce((a, b) => a + b, 0); h += `<section class="card">${lbl('Subject balance', '7 days')}${Object.entries(I.sub7).sort((a, b) => b[1] - a[1]).map(([s, m]) => `<div class="row g8" style="margin:8px 0"><span class="sm w78">${esc(s)}</span><div class="bar grow"><i style="width:${m / tot * 100}%;background:${SCOL[s] || '#9a9aa8'}"></i></div><span class="xs mut w56 r">${fm(m)}</span></div>`).join('')}</section>`; }
   if (I.urge_triggers.length) h += `<section class="card">${lbl('Your triggers')}<div class="chips">${I.urge_triggers.map(t => `<span class="pill">${esc(t.trigger)} ×${t.n}</span>`).join('')}</div></section>`;
-  h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge r-${b.rarity} ${b.got ? '' : 'off'}"><s>${esc(b.emoji)}</s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div><div class="rar">${esc(b.rname)} · +${b.xp} XP · held by ${b.holders}/${b.total}</div></div>`).join('')}</div></section>`;
+  h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge r-${b.rarity} ${b.got ? '' : 'off'}"><s><i>${esc(b.emoji)}</i></s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div><div class="rar">${esc(b.rname)} · +${b.xp} XP · held by ${b.holders}/${b.total}</div></div>`).join('')}</div></section>`;
   if (u.admin) h += `<section class="card">${lbl('Server')}<p class="sm mut">You run this crew. Live stats, PIN resets, moderation, backups.</p><button class="btn-xl" data-act="admin">Open server dashboard</button></section>`;
   h += `<section class="card">${lbl('Settings')}<label>Display name</label><input id="s_name" value="${esc(u.display)}" maxlength="20"><label>Identity: "I am becoming someone who…"</label><input id="s_id" value="${esc(u.identity)}" placeholder="shows up before he feels like it" maxlength="140">
     <div class="grid2"><div><label>Old A+ you studied (hrs/day)</label><input id="s_base" type="number" step="0.5" value="${u.baseline_h}"></div><div><label>Daily floor (min)</label><input id="s_floor" type="number" value="${u.daily_min}"></div></div>
     <label>Exams (name and date)</label>${[0, 1, 2].map(i => { const x = u.exams[i] || {}; return `<div class="row g8" style="margin-bottom:6px"><input id="s_en${i}" placeholder="JEE Main" value="${esc(x.name || '')}"><input id="s_ed${i}" type="date" value="${esc(x.date || '')}" style="width:156px"></div>`; }).join('')}
     <label>Avatar emoji and colour</label><div class="row g8"><input id="s_emo" value="${esc(u.emoji)}" style="width:84px"><input id="s_col" type="color" value="${esc(u.color)}" style="width:72px;padding:3px"></div>
-    <button class="btn-p btn-xl mt12" data-act="saveSettings">Save</button><button class="btn-xl mt8" data-act="notif">Enable alerts when friends start a block</button><button class="btn-d btn-xl mt8" data-act="logout">Log out</button></section>`;
+    <label class="row g8" style="margin-top:14px"><input id="s_fx" type="checkbox" ${fxOn() ? 'checked' : ''}> <span class="sm tx">Sound and haptics</span></label><button class="btn-p btn-xl mt12" data-act="saveSettings">Save</button><button class="btn-xl mt8" data-act="notif">Enable alerts when friends start a block</button><button class="btn-d btn-xl mt8" data-act="logout">Log out</button></section>`;
   if (I.xp_log.length) h += `<section class="card">${lbl('Recent XP')}${I.xp_log.map(x => `<div class="row between sm" style="padding:4px 0"><span class="mut">${esc(x.label)}</span><b class="num">${x.amount > 0 ? '+' : ''}${x.amount}</b></div>`).join('')}</section>`;
   return h;
 }
 
 /* ---------- onboarding & urge ---------- */
-function onboard() {
-  modal(`<h2>Set the terms.</h2><p class="mut sm">You were an A+ student. That person still exists, they just need a system. Set the bar they'd set.</p>
-  <label>Who are you becoming? ("I am someone who…")</label><input id="o_id" placeholder="studies before he's motivated" maxlength="140">
-  <label>On your best A+ days, how many hours a day did you study?</label><input id="o_base" type="number" step="0.5" value="5">
-  <label>Your daily floor (minutes). The minimum that keeps the streak alive, even on bad days.</label><input id="o_floor" type="number" value="45">
-  <label>Exam 1 (name and date)</label><div class="row g8"><input id="o_n1" placeholder="JEE Main" value="JEE Main"><input id="o_d1" type="date" style="width:156px"></div>
-  <label>Exam 2</label><div class="row g8"><input id="o_n2" placeholder="CBSE Boards" value="CBSE Boards"><input id="o_d2" type="date" style="width:156px"></div>
-  <button class="btn-p btn-xl mt12" data-act="saveOnboard">Let's go</button>`, true);
+const PACE = [[2, 917], [4, 1963], [6, 3310], [8, 5257]];   // hours a day -> average XP a day (improvements.md, section 1.3)
+const TIER_AT = [1, 5, 12, 20, 28, 35, 42, 53, 66, 78, 92, 100];
+function paceTier(xp) { const lv = Math.floor(Math.sqrt(Math.max(xp, 0) / 190)) + 1; let i = 0; TIER_AT.forEach((l, k) => { if (lv >= l) i = k; }); return { lv, name: TIERS[i] }; }
+function obRead() { const o = S.ob = S.ob || {}; ['id', 'base', 'floor', 'n1', 'd1', 'n2', 'd2'].forEach(k => { const e = $('#o_' + k); if (e) o[k] = e.value; }); return o; }
+function obDays(o) { const ds = [o.d1, o.d2].filter(Boolean).map(d => Math.ceil((new Date(d + 'T00:00') - Date.now()) / 864e5)).filter(n => n > 0); return ds.length ? Math.min(...ds) : 0; }
+function obPace() {
+  const el = $('#ob_pace'); if (!el) return;
+  const days = obDays(obRead());
+  el.innerHTML = days ? `<div class="sm mut">${days} days to your first exam. Where each pace lands you:</div>` + PACE.map(([h, xp]) => { const t = paceTier(xp * days); return `<div class="row between sm" style="padding:7px 0;border-bottom:1px solid var(--line)"><span>${h}h a day</span><span class="row g8">${emblem(t.name, 18)}<b>${esc(t.name)}</b><span class="xs mut">Lv ${t.lv}</span></span></div>`; }).join('') : '<div class="sm mut">Add an exam date to see where each daily pace takes you.</div>';
+}
+function onboard(step) {
+  const o = S.ob = S.ob || { id: '', base: 5, floor: 45, n1: 'JEE Main', d1: '', n2: 'CBSE Boards', d2: '' };
+  S.obStep = step || S.obStep || 1;
+  const dots = `<div class="obdots">${[1, 2, 3].map(i => `<i class="${i <= S.obStep ? 'on' : ''}"></i>`).join('')}</div>`;
+  let b;
+  if (S.obStep === 1) b = `<h2>Set the terms.</h2><p class="mut sm">You were an A+ student. That person still exists, they just need a system.</p>
+    <label>Who are you becoming? ("I am someone who…")</label><input id="o_id" value="${esc(o.id)}" placeholder="studies before he's motivated" maxlength="140">
+    <label>On your best A+ days, how many hours a day did you study?</label><input id="o_base" type="number" step="0.5" value="${esc(o.base)}">
+    <label>Your daily floor (minutes). The minimum that keeps the streak alive, even on bad days.</label><input id="o_floor" type="number" value="${esc(o.floor)}">
+    <button class="btn-p btn-xl mt12" data-act="obNext">Next</button>`;
+  else if (S.obStep === 2) b = `<h2>Your deadline.</h2><p class="mut sm">Exam dates turn "someday" into a number of days.</p>
+    <label>Exam 1 (name and date)</label><div class="row g8"><input id="o_n1" value="${esc(o.n1)}" placeholder="JEE Main"><input id="o_d1" type="date" value="${esc(o.d1)}" style="width:156px"></div>
+    <label>Exam 2</label><div class="row g8"><input id="o_n2" value="${esc(o.n2)}" placeholder="CBSE Boards"><input id="o_d2" type="date" value="${esc(o.d2)}" style="width:156px"></div>
+    <div id="ob_pace" class="mt12"></div>
+    <div class="row g8 mt12"><button class="btn-lg" data-act="obBack">Back</button><button class="btn-p btn-lg grow" data-act="obNext">Next</button></div>`;
+  else b = `<h2>How it works.</h2>
+    <div class="obrow"><b>Verified minutes</b><span>Use the timer. Every minute earns ${XPM} XP, with bonuses at 25, 50, 90 and 120 minutes. Manual logs pay half.</span></div>
+    <div class="obrow"><b>Your floor</b><span>${esc(o.floor || 45)} minutes a day, at least half on the timer, keeps the streak alive.</span></div>
+    <div class="obrow"><b>Titles</b><span>XP builds levels. Twelve titles, from Sleepwalker to RAGDAMAXED. The crew sees where you stand.</span></div>
+    <button class="btn-p btn-xl mt12" data-act="obFinish" data-start="1">Start my first 5 minutes</button><button class="btn-text" data-act="obFinish">Skip, take me to Today</button>`;
+  modal(dots + b, true);
+  if (S.obStep === 2) obPace();
 }
 function urgeFlow() {
   const trig = ['Instagram', 'Reels/Shorts', 'YouTube', 'Gaming', 'Texting', 'Overthinking', 'Just tired', 'Other'];
@@ -756,24 +868,24 @@ const A = {
     thinkToast(await api('pomo/start', { subject: S.pickSub, total: c.total, work: c.work, brk: c.brk })); await refresh();
   },
   async skipBreak() { await api('pomo/skip', {}); await refresh(); },
-  async endPlan() { if (!confirm('End the pomodoro plan? Completed blocks stay logged.')) return; await api('pomo/stop', {}); S.beepKey = null; await refresh(); },
+  async endPlan() { if (!(await confirmSheet('End the pomodoro plan? Completed blocks stay logged.', 'End plan', true))) return; await api('pomo/stop', {}); S.beepKey = null; await refresh(); },
   async extend() { await api('timer/extend', { add: 20 }); S.beeped = false; S.msgKey = ''; await refresh(); },
   async distract() {
     await api('timer/distract', {});
     if (S.today?.timer) { S.today.timer.distractions++; $$('#dcount,#fs-dcount').forEach(n => { n.textContent = S.today.timer.distractions; }); }
   },
-  async stopTimer() { if (S.today?.pomo && !confirm('End the pomodoro plan and log this block?')) return; await finishTimer(); },
-  async discard() { if (confirm('Discard this block? Nothing will be logged.')) await finishTimer({ discard: true }); },
+  async stopTimer() { if (S.today?.pomo && !(await confirmSheet('End the pomodoro plan and log this block?', 'End and log'))) return; await finishTimer(); },
+  async discard() { if (await confirmSheet('Discard this block? Nothing will be logged.', 'Discard', true)) await finishTimer({ discard: true }); },
   async manual() { await api('focus', { subject: val('mf_s'), minutes: +val('mf_m') }); await refresh(); },
   async delFocus(el) { await api('focus/delete', { id: +el.dataset.id }); await refresh(); },
-  async habit(el) { const on = S.today.habits.includes(el.dataset.id); await api('habit', { habit: el.dataset.id, done: !on }); await refresh(); },
+  async habit(el) { const on = S.today.habits.includes(el.dataset.id); el.classList.toggle('on', !on); await api('habit', { habit: el.dataset.id, done: !on }); await refresh(); },
   async chest() {
     const r = await api('chest', {}); confetti();
     modal(`<div class="c"><div class="xs mut up">${esc(r.tier.toUpperCase())}</div><div class="bignum">${esc(r.label)}</div><p class="sm mut mt8">Daily chest opened. Come back tomorrow.</p><button class="btn-p btn-xl mt12" data-act="closeModal">Nice</button></div>`);
     await refresh();
   },
   async addPlan(el) { const t = val('pl_t'); if (!t) return toast('Write the task first'); await api('plan', { when: el.dataset.v, text: t, cue: val('pl_c') }); await refresh(); },
-  async togglePlan(el) { await api('plan/toggle', { id: +el.dataset.id }); await refresh(); },
+  async togglePlan(el) { el.classList.toggle('on'); await api('plan/toggle', { id: +el.dataset.id }); await refresh(); },
   async delPlan(el) { await api('plan/delete', { id: +el.dataset.id }); await refresh(); },
   urge() { urgeFlow(); }, urgeStart(el) { urgeRun(el.dataset.v); },
   async urgeDone(el) {
@@ -806,22 +918,58 @@ const A = {
   async react(el) { await api('react', { feed_id: +el.dataset.id, emoji: el.dataset.e }); S.crew = await api('crew'); render(); },
   async duel() { await api('duel', { opponent: +val('du_o'), days: +val('du_d') }); toast('Challenge sent'); await refresh(); },
   async acceptDuel(el) { await api('duel/accept', { id: +el.dataset.id }); await refresh(); },
-  copy(el) { try { navigator.clipboard?.writeText(el.dataset.v); toast('Invite code copied'); } catch (e) { toast('Copy failed', el.dataset.v); } },
-  async saveOnboard() {
-    const ex = [[val('o_n1'), val('o_d1')], [val('o_n2'), val('o_d2')]].filter(x => x[1]).map(x => ({ name: x[0] || 'Exam', date: x[1] }));
-    const r = await api('settings', { identity: val('o_id'), baseline_h: +val('o_base'), daily_min: +val('o_floor'), exams: ex.length ? ex : undefined, onboarded: true }); S.user = r.user; closeModal(); await refresh();
-  },
+  copy(el) { try { navigator.clipboard?.writeText(el.dataset.v); toast(el.dataset.t || 'Invite code copied'); } catch (e) { toast('Copy failed', el.dataset.v); } },
   async saveSettings() {
     const ex = [0, 1, 2].map(i => ({ name: val('s_en' + i) || 'Exam', date: val('s_ed' + i) })).filter(x => x.date);
-    const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, emoji: val('s_emo'), color: val('s_col') }); S.user = r.user; toast('Saved'); await refresh();
+    const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, emoji: val('s_emo'), color: val('s_col') }); S.user = r.user; try { localStorage.setItem('rg_fx', JSON.stringify(!!($('#s_fx') && $('#s_fx').checked))); } catch (e) { } toast('Saved'); await refresh();
   },
   async notif() { if (!('Notification' in window)) return toast('Not supported here'); const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Alerts on while the app is open' : 'Blocked'); },
   enterFullscreenFocus() { enterFullscreenFocus(); },
   exitFullscreenFocus() { exitFullscreenFocus(); },
   fsClockNext() { fsStep(1); },
   fsClockPrev() { fsStep(-1); },
-  async logAndExitFocus() { if (S.today?.pomo && !confirm('End the pomodoro plan and log this block?')) return; try { await finishTimer(); } catch (e) { } },
+  async logAndExitFocus() { if (S.today?.pomo && !(await confirmSheet('End the pomodoro plan and log this block?', 'End and log'))) return; try { await finishTimer(); } catch (e) { } },
 };
+Object.assign(A, {
+  async startSuggest(el) { S.pickSub = el.dataset.sub; PREF.set('sub', S.pickSub); thinkToast(await api('timer/start', { subject: el.dataset.sub, target: +el.dataset.dur, mode: 'timer' })); await refresh(); },
+  obNext() { obRead(); onboard(Math.min(3, (S.obStep || 1) + 1)); },
+  obBack() { obRead(); onboard(Math.max(1, (S.obStep || 1) - 1)); },
+  async obFinish(el) {
+    const o = obRead(), ex = [[o.n1, o.d1], [o.n2, o.d2]].filter(x => x[1]).map(x => ({ name: x[0] || 'Exam', date: x[1] }));
+    const r = await api('settings', { identity: o.id, baseline_h: +o.base || 5, daily_min: +o.floor || 45, exams: ex.length ? ex : undefined, onboarded: true });
+    S.user = r.user; S.ob = null; S.obStep = 1; closeModal();
+    if (el.dataset.start) { try { thinkToast(await api('timer/start', { subject: S.pickSub, target: 5 })); } catch (e) { } }
+    await refresh();
+  },
+  shareCard,
+});
+/* stat card as an image: native share sheet where available, plain download otherwise */
+async function shareCard() {
+  const I = S.ins, u = S.user; if (!I) return;
+  const L = I.level, e = I.evidence, W = 1080, H = 1350, tc = TIER_COL[tierIdx(L.rank)];
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const g = cv.getContext('2d');
+  g.fillStyle = '#09090b'; g.fillRect(0, 0, W, H);
+  const gr = g.createRadialGradient(W / 2, 330, 20, W / 2, 330, 640); gr.addColorStop(0, tc + '33'); gr.addColorStop(1, '#09090b00'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  try {
+    const img = new Image(); await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(emblem(L.rank, 320)); });
+    g.drawImage(img, W / 2 - 160, 130, 320, 320);
+  } catch (x) { }
+  const ff = 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'; g.textAlign = 'center';
+  g.fillStyle = '#ececf1'; g.font = `600 56px ${ff}`; g.fillText(u.display, W / 2, 540);
+  g.fillStyle = tc; g.font = `800 92px ${ff}`; g.fillText(L.rank, W / 2, 640);
+  g.fillStyle = '#80808c'; g.font = `500 38px ${ff}`; g.fillText(`Level ${L.level} · ${L.xp.toLocaleString()} XP`, W / 2, 704);
+  const cells = [[`${e.hours}h`, 'focused'], [e.longest, 'best streak'], [e.days_hit, 'floor days'], [e.deep, 'deep blocks'], [I.badges.filter(b => b.got).length, 'badges'], [e.learned, 'chapters']];
+  cells.forEach(([v, l], i) => {
+    const x = 210 + (i % 3) * 330, y = 880 + Math.floor(i / 3) * 190;
+    g.fillStyle = '#ececf1'; g.font = `700 80px ${ff}`; g.fillText(String(v), x, y);
+    g.fillStyle = '#80808c'; g.font = `500 32px ${ff}`; g.fillText(l, x, y + 48);
+  });
+  g.fillStyle = '#80808c'; g.font = `700 30px ${ff}`; g.fillText('R A G D A M A X I N G', W / 2, 1270);
+  const blob = await new Promise(r => cv.toBlob(r, 'image/png')); if (!blob) return toast('Could not make the card');
+  const f = new File([blob], 'ragdamaxing.png', { type: 'image/png' });
+  if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f], text: `${u.display} · ${L.rank} · Level ${L.level}` }); return; } catch (x) { if (x && x.name === 'AbortError') return; } }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'ragdamaxing-card.png'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast('Card saved');
+}
 /* one click handler for the whole app. A busy flag stops double taps from double submitting. */
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || !A[el.dataset.act]) return;
@@ -835,11 +983,12 @@ document.addEventListener('click', async e => {
 document.addEventListener('pointerdown', () => { S.lastPtr = Date.now(); }, { passive: true });
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal' && !$('#modal').classList.contains('lock')) A.closeModal(); });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { if (S.fs) exitFullscreenFocus(); else if (modalOpen() && !$('#modal').classList.contains('lock')) A.closeModal(); return; }
+  if (e.key === 'Escape') { if ($('#cfm')) return; if (S.fs) exitFullscreenFocus(); else if (modalOpen() && !$('#modal').classList.contains('lock')) A.closeModal(); return; }
   if (e.key === 'Enter' && S.user === null && e.target.closest && e.target.closest('.auth') && e.target.tagName === 'INPUT') A[S.authMode === 'login' ? 'login' : 'register']();
 });
 document.addEventListener('input', e => {
   const id = e.target.id || '';
+  if (id === 'o_d1' || id === 'o_d2') obPace();
   if (id.startsWith('pomo_')) {
     S.pomoCfg = { total: +val('pomo_total'), work: +val('pomo_work'), brk: +val('pomo_brk') };
     const p = $('#pomo_prev'); if (p) p.textContent = pomoPrev();
@@ -1041,9 +1190,9 @@ Object.assign(A, {
   chatOpen(el) { return chatOpen(el.dataset.v); },
   async chatBack() { chatStop(); CH.open = null; try { await chatLoadThreads(); } catch (e) { } render(); },
   chatSend, chatOlder, chatSel, chatReact, chatReply, chatEdit, chatCancel, chatJump, chatMention,
-  async chatDel(el) { if (!confirm('Delete this message for everyone?')) return; try { await api('chat/delete', { id: +el.dataset.id }); CH.msgs = CH.msgs.filter(m => m.id !== +el.dataset.id); chatPaint(false); } catch (e) { } },
+  async chatDel(el) { if (!(await confirmSheet('Delete this message for everyone?', 'Delete', true))) return; try { await api('chat/delete', { id: +el.dataset.id }); CH.msgs = CH.msgs.filter(m => m.id !== +el.dataset.id); chatPaint(false); } catch (e) { } },
   admin: adminOpen,
-  async adminReset(el) { if (!confirm(`Reset PIN for @${el.dataset.v}? They get logged out.`)) return; try { const r = await api('admin/resetpin', { username: el.dataset.v }); prompt(`New PIN for ${r.username} (send it to them privately):`, r.pin); } catch (e) { } },
+  async adminReset(el) { if (!(await confirmSheet(`Reset PIN for @${el.dataset.v}? They get logged out.`, 'Reset PIN', true))) return; try { const r = await api('admin/resetpin', { username: el.dataset.v }); await pinSheet(r.username, r.pin); } catch (e) { } },
 });
 document.addEventListener('input', e => { if (e.target.id === 'chat_in') { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; } });
 document.addEventListener('keydown', e => { if (e.target.id === 'chat_in' && e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(pointer:coarse)').matches) { e.preventDefault(); chatSend(); } });
@@ -1129,8 +1278,8 @@ Object.assign(A, {
     await api('admin/xp', { id: uid, amount: amt, reason, side }); toast('XP adjusted'); S.adm = await api('admin/stats'); adminShowTab('activity');
   },
   async adminBlock(el) { await api('admin/block', { id: +el.dataset.id, blocked: !!+el.dataset.on }); toast(+el.dataset.on ? 'Blocked' : 'Unblocked'); S.adm = await api('admin/stats'); adminShowTab('moderate'); },
-  async adminKick(el) { if (!confirm('Kick from crew? They cannot rejoin with the same code.')) return; await api('admin/kick', { id: +el.dataset.id }); toast('Kicked'); S.adm = await api('admin/stats'); adminShowTab('moderate'); },
-  async adminRevoke(el) { if (!confirm('Revoke this XP event? This adds a negative entry to undo it.')) return; await api('admin/revoke', { id: +el.dataset.id }); toast('Revoked'); adminLoadActivity(true); },
+  async adminKick(el) { if (!(await confirmSheet('Kick from crew? They cannot rejoin with the same code.', 'Kick', true))) return; await api('admin/kick', { id: +el.dataset.id }); toast('Kicked'); S.adm = await api('admin/stats'); adminShowTab('moderate'); },
+  async adminRevoke(el) { if (!(await confirmSheet('Revoke this XP event? This adds a negative entry to undo it.', 'Revoke', true))) return; await api('admin/revoke', { id: +el.dataset.id }); toast('Revoked'); adminLoadActivity(true); },
 });
 document.addEventListener('change', e => { if (e.target.id === 'actFilterUser') { adminUser = e.target.value; adminLoadActivity(true); } });
 

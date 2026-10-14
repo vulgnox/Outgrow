@@ -167,6 +167,8 @@ CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread, id);
 CREATE INDEX IF NOT EXISTS idx_msg_recip ON messages(recip, id);
 CREATE TABLE IF NOT EXISTS chat_reads(user_id INTEGER, thread TEXT, last_id INTEGER DEFAULT 0, PRIMARY KEY(user_id, thread));
 CREATE TABLE IF NOT EXISTS msg_reacts(msg_id INTEGER, user_id INTEGER, emoji TEXT, PRIMARY KEY(msg_id, user_id));
+CREATE TABLE IF NOT EXISTS season_results(crew_id INTEGER, season INTEGER, data TEXT, PRIMARY KEY(crew_id, season));
+CREATE TABLE IF NOT EXISTS cosmetics(user_id INTEGER, item TEXT, src TEXT, cost INTEGER DEFAULT 0, day TEXT, PRIMARY KEY(user_id, item));
 CREATE TABLE IF NOT EXISTS pomo(user_id INTEGER PRIMARY KEY, subject TEXT, total_min INTEGER, work_min INTEGER, break_min INTEGER,
  long_min INTEGER, every INTEGER, done_min INTEGER DEFAULT 0, block INTEGER DEFAULT 1, phase TEXT, phase_start REAL, phase_len INTEGER, started REAL);
 """
@@ -322,7 +324,7 @@ def feed(c, kind, text, uid=None):
         return
     c.conn.execute("INSERT INTO feed(crew_id,user_id,ts,kind,text) VALUES(?,?,?,?,?)",
                    (u["crew_id"], uid, now().isoformat(timespec="seconds"), kind, text))
-    if WEBHOOK and kind in ("badge", "levelup", "streak", "comeback", "test", "duel", "crew", "record", "boss"):
+    if WEBHOOK and kind in ("badge", "levelup", "streak", "comeback", "test", "duel", "crew", "record", "boss", "season", "cosmetic", "challenge"):
         embed = build_feed_embed(u, kind, text)
         threading.Thread(target=post_hook, args=(None, embed), daemon=True).start()
 
@@ -665,7 +667,7 @@ def badge_view(conn, got):
 
 def check_badges(c):
     u = c.user
-    s = get_stats(c.conn, u)
+    s = c._stats = get_stats(c.conn, u)
     have = {r["id"] for r in q(c.conn, "SELECT id FROM badges WHERE user_id=?", (u["id"],))}
 
     def grant(bid, emoji, name, desc, rar):
@@ -716,11 +718,14 @@ def evaluate(c):
         if award(c, f"sweep:{ts}", 50, "Clean sweep: all quests done"):
             feed(c, "streak", "cleared every daily quest ✅")
     check_badges(c)
+    cosmetic_check(c)
+    wchal_check(c)
     if u["crew_id"]:
         team_goal(c)
         check_boss_battle(c)
         resolve_duels(c)
         rank_check(c)
+        season_settle(c)
 
 
 def rank_check(c):
@@ -851,7 +856,8 @@ def is_admin(u):
 def public_user(u):
     return {"admin": is_admin(u), "id": u["id"], "username": u["username"], "display": u["display"], "color": u["color"], "emoji": u["emoji"],
             "identity": u["identity"], "baseline_h": u["baseline_h"], "daily_min": u["daily_min"],
-            "onboarded": u["onboarded"], "exams": json.loads(u["exams"] or "[]"), "crew_id": u["crew_id"]}
+            "onboarded": u["onboarded"], "exams": json.loads(u["exams"] or "[]"), "crew_id": u["crew_id"],
+            "av": u.get("av") or "", "fr": u.get("fr") or ""}
 
 
 def new_session(c, uid):
@@ -1079,6 +1085,7 @@ def api_today(c):
         "sessions": q(c.conn, "SELECT id, subject, minutes, kind, hour FROM focus WHERE user_id=? AND day=? ORDER BY id DESC", (uid, ts)),
         "reflected": bool(q1(c.conn, "SELECT id FROM reflections WHERE user_id=? AND day=?", (uid, ts))),
         "rival": rival_info, "standing": standing, "boss": boss_info, "pomo": pomo_view(c),
+        "season": season_brief(c.conn, u), "chal": chal_view(c.conn, u), "wallet": wallet(c.conn, uid)[0],
     }
 
 
@@ -1578,6 +1585,7 @@ def api_crew(c):
                  "longest": mu["longest"]}
         live = q1(c.conn, "SELECT subject, started, mode FROM timers WHERE user_id=?", (mu["id"],))
         out.append({"id": mu["id"], "display": mu["display"], "emoji": mu["emoji"], "color": mu["color"], "me": mu["id"] == u["id"],
+                    "av": mu["av"] or "", "fr": mu["fr"] or "",
                     "identity": mu["identity"], "week_xp": wk, "last_week_xp": lw, "week_min": wm, "today_min": st["total"],
                     "streak": sv["now"], "qualified": sv["qualified"], "level": level_info(tx), **extra,
                     "live": {"subject": live["subject"], "elapsed": int(time.time() - live["started"]), "mode": live["mode"] or "timer"} if live else None})
@@ -1632,7 +1640,7 @@ def api_crew(c):
         w = next(m for m in out if m["id"] == crown["user_id"])
         crown_holder = {"name": w["display"], "emoji": w["emoji"], "xp": crown["x"]}
     
-    fd = q(c.conn, """SELECT f.id, f.ts, f.kind, f.text, us.display, us.emoji, us.color, f.user_id FROM feed f JOIN users us ON us.id=f.user_id
+    fd = q(c.conn, """SELECT f.id, f.ts, f.kind, f.text, us.display, us.emoji, us.color, us.av, us.fr, f.user_id FROM feed f JOIN users us ON us.id=f.user_id
         WHERE f.crew_id=? ORDER BY f.id DESC LIMIT 40""", (crew["id"],))
     for f in fd:
         rs = q(c.conn, "SELECT emoji, COUNT(*) n FROM reactions WHERE feed_id=? GROUP BY emoji", (f["id"],))
@@ -1647,7 +1655,7 @@ def api_crew(c):
                 d[k + "_min"] = c.conn.execute("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day BETWEEN ? AND ?", (d[k], d["start"], d["end"])).fetchone()[0]
     return {"crew": {"name": crew["name"], "code": crew["code"], "goal_h": crew["goal_h"]}, "members": out, "rival": rival,
             "team": {"minutes": sum(m["week_min"] for m in out), "goal": int(goal_min)}, "feed": fd, "duels": duels, "me": u["id"], "hall": hall, "records": records,
-            "boss": boss_status, "crown": crown_holder}
+            "boss": boss_status, "crown": crown_holder, "season": season_view(c.conn, u)}
 
 
 def fmin(m):
@@ -1834,7 +1842,8 @@ def api_profile(c):
     duels = q1(c.conn, "SELECT COUNT(*) n, COALESCE(SUM(winner=?),0) w FROM duels WHERE status='done' AND (a=? OR b=?)", (uid, uid, uid))
     live = q1(c.conn, "SELECT subject, mode FROM timers WHERE user_id=?", (uid,))
     recent = q(c.conn, "SELECT ts, text FROM feed WHERE user_id=? AND kind<>'join' ORDER BY id DESC LIMIT 8", (uid,))
-    return {"user": {"id": p["id"], "display": p["display"], "emoji": p["emoji"], "color": p["color"], "identity": p["identity"], "me": uid == me["id"]},
+    return {"user": {"id": p["id"], "display": p["display"], "emoji": p["emoji"], "color": p["color"], "identity": p["identity"], "me": uid == me["id"],
+                     "av": p["av"] or "", "fr": p["fr"] or "", "titles": season_titles(c.conn, p)},
             "level": level_info(total_xp(c.conn, uid)), "streak": {"now": sv["now"], "longest": max(p["longest"], sv["now"])},
             "live": live, "today_min": st["total"],
             "stats": {"hours": round(s["minutes"] / 60, 1), "xp": total_xp(c.conn, uid), "best_day": s["best_day"], "best_session": s["best_session"],
@@ -2143,8 +2152,8 @@ def chat_unread(conn, u):
 
 
 def chat_people(conn, crew_id):
-    return {r["id"]: {"display": r["display"], "emoji": r["emoji"], "color": r["color"]}
-            for r in q(conn, "SELECT id, display, emoji, color FROM users WHERE crew_id=?", (crew_id,))}
+    return {r["id"]: {"display": r["display"], "emoji": r["emoji"], "color": r["color"], "av": r["av"] or "", "fr": r["fr"] or ""}
+            for r in q(conn, "SELECT id, display, emoji, color, av, fr FROM users WHERE crew_id=?", (crew_id,))}
 
 
 CHAT_EMOJIS = ["🔥", "💀", "😂", "👍", "❤️", "🫡", "💯"]
@@ -2557,6 +2566,316 @@ def admin_kick(c):
     return {"ok": True}
 
 
+# ----------------------------------------------------------------------------- seasons, weekly challenge, cosmetics
+# A season is 4 weeks. Standing = grind XP earned inside it (the same number the weekly league ranks). To be eligible for a prize you must
+# have put in 40 verified hours AND hit your floor on 14 days, so nobody wins by one lucky week or by logging manually.
+SEASON_DAYS = 28
+SEASON_ANCHOR = pd(env("SEASON_ANCHOR", "2026-10-12"))   # a Monday. Season 1 starts here, a new one every 28 days
+SEASON_PRIZES = (30000, 15000, 8000)
+SEASON_CAT_PRIZE = 5000
+SEASON_MIN_MIN, SEASON_MIN_FLOOR = 40 * 60, 14
+SEASON_CATS = (("hours", "Most Hours", "min", "min"), ("improved", "Most Improved", "min", "improved"), ("streak", "Iron Streak", "days", "floor_days"),
+               ("deep", "Deep Diver", "blocks", "deep"), ("early", "Early Bird", "sessions", "early"))
+
+
+def season_of(d):
+    return (d - SEASON_ANCHOR).days // SEASON_DAYS + 1   # <= 0 before the anchor
+
+
+def season_range(n):
+    a = SEASON_ANCHOR + D((n - 1) * SEASON_DAYS)
+    return a, a + D(SEASON_DAYS - 1)
+
+
+def season_member(conn, u, n):
+    """One member's numbers for season n. Only verified (timer) minutes count towards eligibility and the categories."""
+    a, b = season_range(n)
+    uid = u["id"]
+    f = q1(conn, """SELECT COALESCE(SUM(CASE WHEN kind='timer' THEN minutes END),0) vm,
+        COALESCE(SUM(CASE WHEN kind='timer' AND minutes>=50 THEN 1 END),0) deep,
+        COALESCE(SUM(CASE WHEN kind='timer' AND hour<7 THEN 1 END),0) early
+        FROM focus WHERE user_id=? AND day BETWEEN ? AND ?""", (uid, iso(a), iso(b)))
+    floor_days = sum(1 for v in day_stats(conn, uid, a, b).values() if qualifies(v, u["daily_min"]))
+    prev = 0
+    if n > 1:
+        pa, pb = season_range(n - 1)
+        prev = conn.execute("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND kind='timer' AND day BETWEEN ? AND ?",
+                            (uid, iso(pa), iso(pb))).fetchone()[0]
+    return {"id": uid, "xp": grind(conn, uid, iso(a), iso(b + D(1))), "min": f["vm"], "floor_days": floor_days, "deep": f["deep"], "early": f["early"],
+            "improved": f["vm"] - prev if prev > 0 else 0, "eligible": f["vm"] >= SEASON_MIN_MIN and floor_days >= SEASON_MIN_FLOOR}
+
+
+def season_winners(rows):
+    el = sorted([r for r in rows if r["eligible"]], key=lambda r: (-r["xp"], r["id"]))
+    cats = {}
+    for k, _label, _unit, field in SEASON_CATS:
+        pool = [r for r in el if r[field] > 0]
+        if pool:
+            w = max(pool, key=lambda r: (r[field], -r["id"]))
+            cats[k] = {"uid": w["id"], "value": w[field]}
+    return [r["id"] for r in el[:3]], cats
+
+
+def crew_members(conn, crew_id):
+    return [m for m in q(conn, "SELECT * FROM users WHERE crew_id=?", (crew_id,)) if not m.get("banned")]
+
+
+def season_settle(c):
+    """Pay out every finished season this crew hasn't been paid for yet. Idempotent (results row + unique XP keys)."""
+    cid, cur = c.user["crew_id"], season_of(today())
+    if cur < 2:
+        return
+    done = {r["season"] for r in q(c.conn, "SELECT season FROM season_results WHERE crew_id=?", (cid,))}
+    for n in range(1, cur):
+        if n in done:
+            continue
+        mem = crew_members(c.conn, cid)
+        rows = [season_member(c.conn, m, n) for m in mem]
+        by = {m["id"]: m for m in mem}
+        xp_of = {r["id"]: r["xp"] for r in rows}
+        podium, cats = season_winners(rows)
+        data = {"season": n, "members": len(rows), "eligible": sum(1 for r in rows if r["eligible"]),
+                "podium": [{"uid": i, "name": by[i]["display"], "emoji": by[i]["emoji"], "xp": xp_of[i]} for i in podium],
+                "cats": {k: {**v, "name": by[v["uid"]]["display"], "emoji": by[v["uid"]]["emoji"]} for k, v in cats.items()}}
+        cur_ = c.conn.execute("INSERT OR IGNORE INTO season_results(crew_id, season, data) VALUES(?,?,?)", (cid, n, json.dumps(data)))
+        if not cur_.rowcount:
+            continue
+        for i, uid in enumerate(podium):
+            award(c, f"season:{n}:{i + 1}", SEASON_PRIZES[i], f"Season {n}: finished #{i + 1}", uid=uid, quiet=uid != c.user["id"])
+            feed(c, "season", f"finished #{i + 1} in Season {n} 🏆 +{SEASON_PRIZES[i]:,} XP", uid=uid)
+            if i == 0:
+                grant_cosmetic(c, "crown", "season", uid=uid)
+        labels = {k: lab for k, lab, _u, _f in SEASON_CATS}
+        for k, v in cats.items():
+            award(c, f"season:{n}:{k}", SEASON_CAT_PRIZE, f"Season {n}: {labels[k]}", uid=v["uid"], quiet=v["uid"] != c.user["id"])
+            feed(c, "season", f"won {labels[k]} in Season {n} 🎖️ +{SEASON_CAT_PRIZE:,} XP", uid=v["uid"])
+
+
+def season_view(conn, u):
+    t = today()
+    n = season_of(t)
+    if not u["crew_id"]:
+        return None
+    if n < 1:
+        return {"n": 0, "starts": iso(SEASON_ANCHOR), "days_to_start": (SEASON_ANCHOR - t).days}
+    a, b = season_range(n)
+    mem = crew_members(conn, u["crew_id"])
+    by = {m["id"]: m for m in mem}
+    rows = sorted([season_member(conn, m, n) for m in mem], key=lambda r: (-r["xp"], r["id"]))
+    place, k = {}, 0
+    for r in rows:
+        if r["eligible"] and k < 3:
+            k += 1
+            place[r["id"]] = k
+    _pod, cats = season_winners(rows)
+    out = []
+    for i, r in enumerate(rows):
+        m = by[r["id"]]
+        out.append({"id": r["id"], "name": m["display"], "emoji": m["emoji"], "color": m["color"], "av": m.get("av") or "", "fr": m.get("fr") or "",
+                    "rank": i + 1, "xp": r["xp"], "hours": round(r["min"] / 60, 1), "floor_days": r["floor_days"], "deep": r["deep"], "early": r["early"],
+                    "eligible": r["eligible"], "place": place.get(r["id"]), "me": r["id"] == u["id"]})
+    leaders = []
+    for key, label, unit, _f in SEASON_CATS:
+        v = cats.get(key)
+        if v:
+            leaders.append({"k": key, "label": label, "unit": unit, "value": v["value"], "name": by[v["uid"]]["display"], "emoji": by[v["uid"]]["emoji"], "me": v["uid"] == u["id"]})
+    hall = []
+    for r in q(conn, "SELECT data FROM season_results WHERE crew_id=? ORDER BY season DESC LIMIT 6", (u["crew_id"],)):
+        d = json.loads(r["data"])
+        if d.get("podium"):
+            hall.append(d)
+    return {"n": n, "start": iso(a), "end": iso(b), "day": (t - a).days + 1, "days": SEASON_DAYS, "days_left": (b - t).days,
+            "prizes": list(SEASON_PRIZES), "cat_prize": SEASON_CAT_PRIZE, "min_hours": SEASON_MIN_MIN // 60, "min_floor": SEASON_MIN_FLOOR,
+            "rows": out, "cats": leaders, "hall": hall}
+
+
+def season_brief(conn, u):
+    v = season_view(conn, u)
+    if not v:
+        return None
+    if v["n"] < 1:
+        return {"n": 0, "days_to_start": v["days_to_start"]}
+    me = next(r for r in v["rows"] if r["me"])
+    above = v["rows"][me["rank"] - 2] if me["rank"] > 1 else None
+    return {"n": v["n"], "day": v["day"], "days": v["days"], "days_left": v["days_left"], "rank": me["rank"], "of": len(v["rows"]), "xp": me["xp"],
+            "hours": me["hours"], "floor_days": me["floor_days"], "eligible": me["eligible"], "place": me["place"],
+            "min_hours": v["min_hours"], "min_floor": v["min_floor"],
+            "chase": {"name": above["name"], "gap": above["xp"] - me["xp"]} if above else None}
+
+
+def season_titles(conn, p):
+    if not p["crew_id"]:
+        return []
+    out = []
+    for r in q(conn, "SELECT data FROM season_results WHERE crew_id=? ORDER BY season", (p["crew_id"],)):
+        d = json.loads(r["data"])
+        place = next((i + 1 for i, x in enumerate(d.get("podium", [])) if x["uid"] == p["id"]), None)
+        cats = [k for k, v in d.get("cats", {}).items() if v["uid"] == p["id"]]
+        if place or cats:
+            out.append({"season": d["season"], "place": place, "cats": cats})
+    return out
+
+
+# ---- weekly challenge: one rotating goal per week, paid in XP. Four of them unlock the Third Eye avatar.
+WCHALLENGES = [  # id, name, description, goal, kind, reward XP
+    ("iron", "Iron Week", "20 hours of verified focus this week", 1200, "min", 600),
+    ("floor", "Six Floors", "Hit your daily floor on 6 days this week", 6, "floor", 500),
+    ("deep", "Deep Work", "8 deep blocks (50+ min) this week", 8, "deep", 500),
+    ("dawn", "Dawn Patrol", "4 blocks started before 7 AM this week", 4, "early", 400),
+    ("triad", "Holy Trinity", "3 hours each of Physics, Chemistry and Maths this week", 180, "triad", 500),
+    ("sit", "One Long Sitting", "A single 2-hour block this week", 120, "sit", 400),
+]
+
+
+def wchal_of(ws):
+    return WCHALLENGES[((ws - SEASON_ANCHOR).days // 7) % len(WCHALLENGES)]
+
+
+def wchal_progress(conn, u, ws, ch):
+    uid, kind, a, b = u["id"], ch[4], iso(ws), iso(ws + D(6))
+    one = lambda sql, *x: conn.execute(sql, (uid, a, b, *x)).fetchone()[0]
+    base = "FROM focus WHERE user_id=? AND day BETWEEN ? AND ? AND kind='timer'"
+    if kind == "min":
+        return one("SELECT COALESCE(SUM(minutes),0) " + base)
+    if kind == "deep":
+        return one("SELECT COUNT(*) " + base + " AND minutes>=50")
+    if kind == "early":
+        return one("SELECT COUNT(*) " + base + " AND hour<7")
+    if kind == "sit":
+        return one("SELECT COALESCE(MAX(minutes),0) " + base)
+    if kind == "triad":
+        return min(one("SELECT COALESCE(SUM(minutes),0) " + base + " AND subject=?", sj) for sj in CORE)
+    return sum(1 for v in day_stats(conn, uid, ws, ws + D(6)).values() if qualifies(v, u["daily_min"]))
+
+
+def wchal_count(conn, uid):
+    return conn.execute("SELECT COUNT(*) FROM xp WHERE user_id=? AND key LIKE 'wchal:%'", (uid,)).fetchone()[0]
+
+
+def chal_view(conn, u):
+    t = today()
+    ws = wstart(t)
+    ch = wchal_of(ws)
+    have = wchal_progress(conn, u, ws, ch)
+    done = bool(conn.execute("SELECT 1 FROM xp WHERE user_id=? AND key=?", (u["id"], f"wchal:{iso(ws)}")).fetchone())
+    return {"id": ch[0], "name": ch[1], "desc": ch[2], "goal": ch[3], "have": min(have, ch[3]), "reward": ch[5], "done": done,
+            "unit": "min" if ch[4] in ("min", "triad", "sit") else "n", "days_left": (ws + D(6) - t).days, "completed": wchal_count(conn, u["id"])}
+
+
+def wchal_check(c):
+    u = c.user
+    ws = wstart(today())
+    ch = wchal_of(ws)
+    if wchal_progress(c.conn, u, ws, ch) >= ch[3] and award(c, f"wchal:{iso(ws)}", ch[5], f"Weekly challenge: {ch[1]}"):
+        feed(c, "challenge", f"completed the weekly challenge: {ch[1]} 🎯")
+
+
+# ---- cosmetics: avatars and frames. Bought with spare XP (wallet = lifetime XP - spent; your level never drops) or earned.
+COSMETICS = [  # id, kind, name, rarity, price (None = earned), how to earn, progress (stat, need, unit, divisor), test
+    {"id": "frost", "kind": "frame", "name": "Frost Ring", "rarity": "C", "price": 2500},
+    {"id": "neon", "kind": "frame", "name": "Neon Pulse", "rarity": "R", "price": 8000},
+    {"id": "ember", "kind": "frame", "name": "Ember Ring", "rarity": "R", "price": None, "how": "Hold a 14-day streak",
+     "prog": ("longest", 14, "days", 1), "test": lambda s: s["longest"] >= 14},
+    {"id": "void", "kind": "frame", "name": "Void Halo", "rarity": "E", "price": 30000},
+    {"id": "crown", "kind": "frame", "name": "Gold Crown", "rarity": "L", "price": None, "how": "Finish a season in 1st place"},
+    {"id": "ronin", "kind": "avatar", "name": "Ronin Mask", "rarity": "C", "price": 3500},
+    {"id": "wolf", "kind": "avatar", "name": "Lone Wolf", "rarity": "R", "price": None, "how": "Log 100 hours of focus",
+     "prog": ("minutes", 6000, "h", 60), "test": lambda s: s["minutes"] >= 6000},
+    {"id": "skull", "kind": "avatar", "name": "Cyber Skull", "rarity": "R", "price": 12000},
+    {"id": "eye", "kind": "avatar", "name": "Third Eye", "rarity": "E", "price": None, "how": "Complete 4 weekly challenges",
+     "prog": ("wchal", 4, "challenges", 1), "test": lambda s: s["wchal"] >= 4},
+    {"id": "phoenix", "kind": "avatar", "name": "Phoenix", "rarity": "L", "price": None, "how": "Sit for 4 hours straight (one stopwatch block)",
+     "prog": ("best_session", 240, "min", 1), "test": lambda s: s["best_session"] >= 240},
+]
+COSMETIC_BY_ID = {x["id"]: x for x in COSMETICS}
+
+
+def wallet(conn, uid):
+    spent = conn.execute("SELECT COALESCE(SUM(cost),0) FROM cosmetics WHERE user_id=?", (uid,)).fetchone()[0]
+    return max(0, total_xp(conn, uid) - spent), spent
+
+
+def grant_cosmetic(c, item, src, uid=None, cost=0):
+    uid = uid or c.user["id"]
+    it = COSMETIC_BY_ID[item]
+    cur = c.conn.execute("INSERT OR IGNORE INTO cosmetics(user_id,item,src,cost,day) VALUES(?,?,?,?,?)", (uid, item, src, cost, iso(today())))
+    if not cur.rowcount:
+        return False
+    if uid == c.user["id"]:
+        c.ev.append({"t": "cosmetic", "kind": it["kind"], "name": it["name"], "item": item, "rarity": RARITY[it["rarity"]][0], "src": src})
+    if src != "buy" or it["rarity"] in ("E", "L"):
+        feed(c, "cosmetic", f"{'bought' if src == 'buy' else 'unlocked'} the {it['name']} {it['kind']} ✨", uid=uid)
+    return True
+
+
+def cosmetic_check(c):
+    u = c.user
+    have = {r["item"] for r in q(c.conn, "SELECT item FROM cosmetics WHERE user_id=?", (u["id"],))}
+    todo = [x for x in COSMETICS if x["id"] not in have and x.get("test")]
+    if not todo:
+        return
+    s = dict(getattr(c, "_stats", None) or get_stats(c.conn, u))
+    s["wchal"] = wchal_count(c.conn, u["id"])
+    for x in todo:
+        if x["test"](s):
+            grant_cosmetic(c, x["id"], "earn")
+
+
+def shop_view(conn, u):
+    uid = u["id"]
+    own = {r["item"]: r["src"] for r in q(conn, "SELECT item, src FROM cosmetics WHERE user_id=?", (uid,))}
+    s = dict(get_stats(conn, u))
+    s["wchal"] = wchal_count(conn, uid)
+    items = []
+    for x in COSMETICS:
+        row = {"id": x["id"], "kind": x["kind"], "name": x["name"], "rarity": x["rarity"], "rname": RARITY[x["rarity"]][0], "price": x["price"],
+               "how": x.get("how"), "owned": x["id"] in own, "src": own.get(x["id"])}
+        if x.get("prog") and x["id"] not in own:
+            k, need, unit, div = x["prog"]
+            row["prog"] = {"have": round(min(s[k], need) / div, 1), "need": round(need / div, 1), "unit": unit}
+        items.append(row)
+    bal, spent = wallet(conn, uid)
+    return {"items": items, "wallet": bal, "spent": spent, "equipped": {"avatar": u.get("av") or "", "frame": u.get("fr") or ""}, "chal": chal_view(conn, u)}
+
+
+@route("GET", "/api/shop")
+def api_shop(c):
+    return shop_view(c.conn, c.user)
+
+
+@route("POST", "/api/shop/buy")
+def api_shop_buy(c):
+    it = COSMETIC_BY_ID.get(need(c, "item"))
+    if not it or it["price"] is None:
+        raise ApiError("That one is not for sale. Earn it.")
+    if q1(c.conn, "SELECT 1 x FROM cosmetics WHERE user_id=? AND item=?", (c.user["id"], it["id"])):
+        raise ApiError("You already own that")
+    bal, _ = wallet(c.conn, c.user["id"])
+    if bal < it["price"]:
+        raise ApiError(f"You need {it['price'] - bal:,} more XP")
+    grant_cosmetic(c, it["id"], "buy", cost=it["price"])
+    c.conn.execute("UPDATE users SET " + ("av" if it["kind"] == "avatar" else "fr") + "=? WHERE id=?", (it["id"], c.user["id"]))
+    c.user = q1(c.conn, "SELECT * FROM users WHERE id=?", (c.user["id"],))
+    return {"ok": True, "user": public_user(c.user), "wallet": wallet(c.conn, c.user["id"])[0]}
+
+
+@route("POST", "/api/shop/equip")
+def api_shop_equip(c):
+    col = {"avatar": "av", "frame": "fr"}.get(need(c, "kind"))
+    if not col:
+        raise ApiError("bad kind")
+    item = str(c.body.get("item") or "").strip()
+    if item:
+        it = COSMETIC_BY_ID.get(item)
+        if not it or it["kind"] != need(c, "kind"):
+            raise ApiError("bad item")
+        if not q1(c.conn, "SELECT 1 x FROM cosmetics WHERE user_id=? AND item=?", (c.user["id"], item)):
+            raise ApiError("You do not own that", 403)
+    c.conn.execute(f"UPDATE users SET {col}=? WHERE id=?", (item, c.user["id"]))
+    c.user = q1(c.conn, "SELECT * FROM users WHERE id=?", (c.user["id"],))
+    return {"ok": True, "user": public_user(c.user)}
+
+
 # ----------------------------------------------------------------------------- http
 class Handler(BaseHTTPRequestHandler):
     server_version = "Ragdamaxing/4"
@@ -2707,6 +3026,8 @@ def migrate(conn):
                             ("messages", "edited", "INTEGER DEFAULT 0"),
                             ("users", "banned", "INTEGER DEFAULT 0"),
                             ("users", "prev_crew", "INTEGER"),
+                            ("users", "av", "TEXT DEFAULT ''"),
+                            ("users", "fr", "TEXT DEFAULT ''"),
                             ("timers", "last_ping", "REAL"),
                             ("timers", "away", "REAL DEFAULT 0")):
         if col not in cols(table):

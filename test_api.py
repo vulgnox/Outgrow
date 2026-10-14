@@ -2,7 +2,7 @@ import json, os, sys, time, urllib.request, http.cookiejar, subprocess, tempfile
 
 PORT = 8799
 tmp = tempfile.mkdtemp()
-env = dict(os.environ, PORT=str(PORT), RAGDAMAXING_DB=os.path.join(tmp, "t.db"), RAGDAMAXING_ADMINS="zenx")
+env = dict(os.environ, PORT=str(PORT), RAGDAMAXING_DB=os.path.join(tmp, "t.db"), RAGDAMAXING_ADMINS="zenx", RAGDAMAXING_SEASON_ANCHOR=(__import__("datetime").date.today() - __import__("datetime").timedelta(days=35)).isoformat())
 srv = subprocess.Popen([sys.executable, "server.py"], env=env, cwd=os.path.dirname(os.path.abspath(__file__)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 time.sleep(1.5)
 
@@ -323,6 +323,51 @@ try:
     check("admin reset pin", s == 200 and len(newpin or "") == 8, r)
     check("old pin dead + session killed", b.call("GET", "/api/me")[0] == 401 and Client().call("POST", "/api/login", {"username": "kritarth", "pin": "abcd"})[0] == 401)
     check("new pin works", Client().call("POST", "/api/login", {"username": "kritarth", "pin": newpin})[0] == 200)
+
+    # ---------------- seasons, weekly challenge, cosmetics
+    import datetime as dt2
+    anchor = dt2.date.today() - dt2.timedelta(days=35)
+    for i in range(14):  # a full eligible season 1 for zenx (user 1): 14 floor days, 14*180 verified min
+        d = (anchor + dt2.timedelta(days=i)).isoformat()
+        db.execute("INSERT INTO focus(user_id,day,subject,minutes,kind,hour) VALUES(1,?,?,?,?,?)", (d, "Physics", 180, "timer", 10))
+    db.commit()
+    db.execute("DELETE FROM season_results"); db.commit()   # earlier evaluate() calls settled season 1 as empty before we seeded it
+    xp0 = a.call("GET", "/api/today")[1]["level"]["xp"]   # evaluate() settles season 1 for the crew
+    s, r = a.call("GET", "/api/today")
+    check("today carries season + chal + wallet", r["season"]["n"] == 2 and "chal" in r and r["wallet"] >= 0, r.get("season"))
+    r = a.call("GET", "/api/crew")[1]
+    hall = r["season"]["hall"]
+    check("season 1 settled with zenx on top", len(hall) == 1 and hall[0]["podium"][0]["name"] == "Zenx" and hall[0]["eligible"] == 1, hall)
+    check("season cats awarded", "hours" in hall[0]["cats"] and hall[0]["cats"]["hours"]["name"] == "Zenx", hall[0]["cats"])
+    check("season prize XP paid once", db.execute("SELECT COUNT(*), SUM(amount) FROM xp WHERE user_id=1 AND key LIKE 'season:1:%'").fetchone()[0] >= 2)
+    a.call("GET", "/api/today")
+    check("settle is idempotent", db.execute("SELECT COUNT(*) FROM xp WHERE user_id=1 AND key='season:1:1'").fetchone()[0] == 1)
+    check("not eligible = no prize", db.execute("SELECT COUNT(*) FROM xp WHERE user_id=2 AND key LIKE 'season:%'").fetchone()[0] == 0)
+    s, r = a.call("GET", "/api/shop")
+    owned = {x["id"] for x in r["items"] if x["owned"]}
+    check("shop: crown granted to season champion", "crown" in owned and len(r["items"]) == 10, owned)
+    check("shop: wallet is a number >= 30000", r["wallet"] >= 30000, r["wallet"])
+    lvl_before = a.call("GET", "/api/me")[1]["level"]["xp"]
+    s, r2 = a.call("POST", "/api/shop/buy", {"item": "frost"})
+    check("buy frost", s == 200 and r2["user"]["fr"] == "frost", r2)
+    check("buying does not reduce XP/level", a.call("GET", "/api/me")[1]["level"]["xp"] == lvl_before)
+    check("wallet drops by price", r2["wallet"] == r["wallet"] - 2500, (r2["wallet"], r["wallet"]))
+    check("buy twice blocked", a.call("POST", "/api/shop/buy", {"item": "frost"})[0] == 400)
+    check("earn-only item not buyable", a.call("POST", "/api/shop/buy", {"item": "phoenix"})[0] == 400)
+    check("cannot afford", cc.call("POST", "/api/shop/buy", {"item": "void"})[0] == 400)
+    check("cannot equip unowned", cc.call("POST", "/api/shop/equip", {"kind": "frame", "item": "crown"})[0] == 403)
+    s, r2 = a.call("POST", "/api/shop/equip", {"kind": "frame", "item": "crown"}); check("equip crown", s == 200 and r2["user"]["fr"] == "crown", r2)
+    s, r2 = a.call("POST", "/api/shop/equip", {"kind": "frame", "item": ""}); check("unequip", r2["user"]["fr"] == "")
+    check("crew shows cosmetics", "fr" in a.call("GET", "/api/crew")[1]["members"][0])
+    prof = a.call("GET", "/api/profile?uid=1")[1]
+    check("profile shows season title", prof["user"]["titles"] and prof["user"]["titles"][0]["place"] == 1, prof["user"].get("titles"))
+    # weekly challenge completes and pays; earn-by-stat unlocks work
+    ch = a.call("GET", "/api/today")[1]["chal"]
+    check("weekly challenge shape", ch["goal"] > 0 and ch["reward"] > 0 and not ch["done"], ch)
+    db.execute("INSERT INTO focus(user_id,day,subject,minutes,kind,hour) VALUES(1,date('now'),'Physics',240,'timer',5)"); db.commit()
+    a.call("POST", "/api/habit", {"habit": "exercise", "done": True})   # any POST runs evaluate()
+    owned = {x["id"] for x in a.call("GET", "/api/shop")[1]["items"] if x["owned"]}
+    check("phoenix earned by 4h sitting", "phoenix" in owned, owned)
 finally:
     srv.send_signal(signal.SIGTERM)
     out = srv.stdout.read()

@@ -117,10 +117,21 @@ function handleEvents(evs) {
   evs.filter(e => e.t === 'info').forEach(e => toast(e.text));
   evs.filter(e => e.t === 'badge').forEach(e => { toast(`${e.emoji} ${e.name}`, `${e.rarity || ''} · +${e.xp || 0} XP · ${e.desc}`, 'badge'); confetti(); });
   const lu = evs.find(e => e.t === 'levelup');
+  evs.filter(e => e.t === 'cosmetic').forEach(e => {
+    if (e.src === 'buy') return toast(`${e.name} is yours`, `${e.rarity} ${e.kind}, equipped`, 'badge');
+    confetti(); if (fxOn() && navigator.vibrate) navigator.vibrate([50, 30, 50, 30, 120]);
+    if (!lu) cosmeticReveal(e);
+  });
   if (lu) {
     confetti(); if (fxOn() && navigator.vibrate) navigator.vibrate([60, 40, 140]);
     modal(`<div class="c lvl"><div class="xs mut up">LEVEL UP</div><div class="bignum">${lu.level}</div><div class="lvl-em">${emblem(lu.rank, 96)}</div><h2>${esc(lu.rank)}</h2>${lu.new_title ? '<div class="pill mt8">New title unlocked</div>' : ''}<p class="sm mut mt12">Another vote for the person you're becoming.</p><button class="btn-p btn-xl mt12" data-act="closeModal">Keep going</button></div>`);
   }
+}
+function cosmeticReveal(e) {
+  const u = S.user || {}, cos = e.kind === 'frame' ? { fr: e.item } : { av: e.item }, col = RC[(e.rarity || 'C')[0]] || RC.C;
+  modal(`<div class="c lvl"><div class="xs mut up">${e.src === 'season' ? 'Season reward' : 'Unlocked'} · ${esc(e.kind)}</div><div class="reveal-av" style="margin:22px 0 14px">${avatar(u.emoji || '🦊', u.color || '#7c6af7', 'xl', null, cos)}</div>
+    <h2 style="color:${RC[{ Common: 'C', Rare: 'R', Epic: 'E', Legendary: 'L' }[e.rarity] || 'C']}">${esc(e.name)}</h2><div class="xs mut up mt4">${esc(e.rarity)}</div>
+    <button class="btn-p btn-xl mt12" data-act="equipItem" data-kind="${esc(e.kind)}" data-item="${esc(e.item)}">Equip it</button><button class="btn-text" data-act="closeModal">Later</button></div>`);
 }
 function modal(html, lock) {
   const m = $('#modal'); m.innerHTML = `<div role="dialog">${html}</div>`;
@@ -188,8 +199,8 @@ async function profileOpen(id) {
   const u = P.user, L = P.level, s = P.stats, st = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
   const hm = P.heat.map(c => `<i title="${esc(c.d)}: ${fm(c.m)}" style="background:${c.m === 0 ? '#17171c' : `rgba(124,106,247,${Math.min(.25 + c.m / 240 * .75, 1)})`}"></i>`).join('');
   const subTot = Object.values(P.sub30).reduce((a, b) => a + b, 0);
-  modal(`<div class="row g8">${avatar(u.emoji, u.color, 'lg', L.rank)}<div class="grow"><h2>${esc(u.display)}${u.me ? ' <span class="you">you</span>' : ''}</h2>
-      <div class="rankline">${emblem(L.rank, 16)}<span>${esc(L.rank)}</span><span class="mut">· Lv ${L.level}</span></div><div class="xs mut">${P.streak.now}-day streak${P.live ? ` · <span class="live-t">live: ${esc(P.live.subject)}</span>` : ''}</div></div></div>
+  modal(`<div class="row g8">${avatar(u.emoji, u.color, 'lg', L.rank, u)}<div class="grow"><h2>${esc(u.display)}${u.me ? ' <span class="you">you</span>' : ''}</h2>
+      <div class="rankline">${emblem(L.rank, 16)}<span>${esc(L.rank)}</span><span class="mut">· Lv ${L.level}</span></div><div class="xs mut">${P.streak.now}-day streak${P.live ? ` · <span class="live-t">live: ${esc(P.live.subject)}</span>` : ''}</div>${titleChips(u.titles)}</div></div>
     ${u.identity ? `<div class="quote">I am ${esc(u.identity)}</div>` : ''}
     <div class="bar thin mt8"><i style="width:${L.pct}%"></i></div><div class="xs mut">${L.xp.toLocaleString()} XP</div>
     <div class="grid3 mt8">${st(s.hours + 'h', 'focused')}${st(P.streak.longest, 'best streak')}${st(s.floor_days, 'floor days')}${st(fm(s.best_day), 'best day')}${st(fm(s.best_session), 'best sitting')}${st(s.deep, 'deep blocks')}</div>
@@ -220,7 +231,24 @@ function lines(series, h = 60) {
 const lbl = (t, right = '') => `<div class="lbl"><span>${t}</span>${right ? `<span class="rt">${right}</span>` : ''}</div>`;
 const seg = (items, cur, act) => `<div class="seg">${items.map(([k, n]) => `<button class="${cur === k ? 'on' : ''}" data-act="${act}" data-v="${esc(k)}">${n}</button>`).join('')}</div>`;
 const ago = ts => { const s = (Date.now() - new Date(ts).getTime()) / 1000; if (s < 90) return 'now'; if (s < 3600) return Math.floor(s / 60) + 'm'; if (s < 86400) return Math.floor(s / 3600) + 'h'; return Math.floor(s / 86400) + 'd'; };
-const avatar = (emo, col, cls = '', rank = null) => { const i = rank == null ? -1 : tierIdx(rank); return `<div class="av ${cls}${i >= 3 ? ' fr' : ''}" style="background:${esc(col)}22;border-color:${esc(col)}${i >= 3 ? `;--tc:${TIER_COL[i]}` : ''}">${esc(emo)}</div>`; };
+/* premium avatars (vector sigils) and animated frames. `cos` is any object carrying { av, fr }: a user, crew member, feed row... */
+const SIGIL = {
+  ronin: '<svg viewBox="0 0 40 40"><path d="M9 9Q20 1 31 9V22Q31 33 20 38Q9 33 9 22Z" fill="#ececf1"/><path d="M12 16l7 3-7 3zM28 16l-7 3 7 3z" fill="#16161e"/><path d="M11 10L29 31" stroke="#e5484d" stroke-width="3" stroke-linecap="round"/><path d="M20 22v6" stroke="#16161e" stroke-width="2"/></svg>',
+  wolf: '<svg viewBox="0 0 40 40"><path d="M5 5l9 9h12l9-9-1 17-14 14L6 22z" fill="#c9ccd6"/><path d="M11 20l6 2-6 2zM29 20l-6 2 6 2z" fill="#f5b83d"/><path d="M17 29h6l-3 4z" fill="#16161e"/><path d="M5 5l5 9M35 5l-5 9" stroke="#8a8fa0" stroke-width="1.5"/></svg>',
+  skull: '<svg viewBox="0 0 40 40"><path d="M20 4C11 4 7 10 7 17c0 5 2 8 5 10v6h16v-6c3-2 5-5 5-10 0-7-4-13-13-13z" fill="#d8dbe6"/><rect x="11" y="15" width="7" height="6" rx="1" fill="#22d3ee"/><rect x="22" y="15" width="7" height="6" rx="1" fill="#22d3ee"/><path d="M20 22l-2.5 4h5z" fill="#16161e"/><path d="M15 33v-4M20 33v-4M25 33v-4" stroke="#16161e" stroke-width="1.5"/><path d="M29 10l-3 3h4l-2 4" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>',
+  eye: '<svg viewBox="0 0 40 40"><path d="M2 21Q20 3 38 21Q20 39 2 21z" fill="#14101f" stroke="#a86bff" stroke-width="2"/><circle cx="20" cy="21" r="8" fill="#a86bff"/><circle cx="20" cy="21" r="3.6" fill="#0b0b12"/><path d="M20 3v5M9 8l3 4M31 8l-3 4" stroke="#c9a8ff" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  phoenix: '<svg viewBox="0 0 40 40"><path d="M20 3c4 8 10 10 10 19 0 7-5 12-10 14-5-2-10-7-10-14 0-9 6-11 10-19z" fill="#ff8a3c"/><path d="M20 14c2 5 5 7 5 11 0 4-3 6-5 7-2-1-5-3-5-7 0-4 3-6 5-11z" fill="#ffd25a"/><path d="M10 17L2 10l5 14zM30 17l8-7-5 14z" fill="#ff5c3c"/></svg>',
+};
+const SK_COL = { ronin: '#c9ccd6', wolf: '#9db4ff', skull: '#22d3ee', eye: '#a86bff', phoenix: '#ff8a3c' };
+const RC = { C: '#9aa0b4', R: '#4da3ff', E: '#a86bff', L: '#f5b83d' };
+const avatar = (emo, col, cls = '', rank = null, cos = null) => {
+  const i = rank == null ? -1 : tierIdx(rank), fr = cos && cos.fr ? String(cos.fr) : '', sk = cos && cos.av && SIGIL[cos.av] ? cos.av : '';
+  const c = sk ? SK_COL[sk] : col, fx = fr ? ` fx-${esc(fr)}` : i >= 3 ? ' fr' : '';
+  const st = `background:${sk ? `radial-gradient(circle at 50% 30%,${c}44,#0c0c12 72%)` : esc(col) + '22'};border-color:${esc(c)}${!fr && i >= 3 ? `;--tc:${TIER_COL[i]}` : ''}`;
+  return `<div class="av ${cls}${fx}${sk ? ' sk' : ''}" style="${st}">${sk ? SIGIL[sk] : esc(emo)}</div>`;
+};
+const CAT_LABEL = { hours: 'Most Hours', improved: 'Most Improved', streak: 'Iron Streak', deep: 'Deep Diver', early: 'Early Bird' };
+const titleChips = ts => (ts && ts.length) ? `<div class="row wrap g4 mt8">${ts.map(t => (t.place ? `<span class="pill gold">${t.place === 1 ? 'Season ' + t.season + ' Champion' : 'Season ' + t.season + ' · #' + t.place}</span>` : '') + t.cats.map(k => `<span class="pill gold">S${t.season} ${esc(CAT_LABEL[k] || k)}</span>`).join('')).join('')}</div>` : '';
 
 /* ---------- auth ---------- */
 function renderAuth() {
@@ -249,7 +277,7 @@ async function loadTab(tab) {
     if (!S.ins) S.ins = await api('insights');
   }
   else if (tab === 'reflect') { const [r, w, rp] = await Promise.all([api('reflect'), api('weekly'), api('report')]); S.refl = r; S.weekly = w; S.report = rp; S.reportView = 'last'; }
-  else if (tab === 'me') { const [ins, gr] = await Promise.all([api('insights'), api('growth')]); S.ins = ins; S.growth = gr; }
+  else if (tab === 'me') { const [ins, gr, sh] = await Promise.all([api('insights'), api('growth'), api('shop')]); S.ins = ins; S.growth = gr; S.shop = sh; }
   else if (tab === 'chat') await chatLoadThreads();
 }
 async function go(tab) {
@@ -553,10 +581,28 @@ function focusBreak(st) {
     <div class="row g8 center mt8"><button class="btn-s" data-act="enterFullscreenFocus">${ic('expand', 15)} Fullscreen</button></div>
     <div class="row g8 mt12"><button class="btn-p btn-lg grow" data-act="skipBreak">Skip break</button><button class="btn-d btn-lg" data-act="endPlan">End plan</button></div></section>`;
 }
+const clamp01 = v => Math.max(0, Math.min(100, v));
+function seasonStrip(T) {
+  const x = T.season; if (!x) return '';
+  if (!x.n) return `<section class="card">${lbl('Season 1')}<div class="sm">The first 4-week season starts in <b>${x.days_to_start}</b> days. Winner takes 30,000 XP and the Gold Crown frame.</div></section>`;
+  const st = x.eligible ? (x.place ? `On the podium, #${x.place}` : 'Eligible') : 'Not eligible yet';
+  return `<section class="card hero seasonc" data-act="tab" data-v="crew" style="cursor:pointer">${lbl(`Season ${x.n}`, `<span class="pill">${x.days_left}d left</span>`)}
+    <div class="row between"><div><div class="bignum sm">#${x.rank}<span class="mut of"> / ${x.of}</span></div><div class="xs mut">${x.xp.toLocaleString()} season XP</div></div><div class="pill ${x.eligible ? 'g' : ''}">${st}</div></div>
+    <div class="qual mt8"><div class="xs mut">${x.hours}h / ${x.min_hours}h verified</div><div class="bar thin"><i style="width:${clamp01(x.hours / x.min_hours * 100)}%"></i></div>
+    <div class="xs mut mt4">${x.floor_days} / ${x.min_floor} floor days</div><div class="bar thin"><i style="width:${clamp01(x.floor_days / x.min_floor * 100)}%"></i></div></div>
+    ${x.chase ? `<div class="xs mut mt8">${x.chase.gap.toLocaleString()} XP behind <b>${esc(x.chase.name)}</b>.</div>` : '<div class="xs mut mt8">You lead the season. Defend it.</div>'}</section>`;
+}
+function chalCard(T) {
+  const ch = T.chal; if (!ch) return '';
+  const f = v => ch.unit === 'min' ? fm(v) : v;
+  return `<section class="card ${ch.done ? '' : 'glow'}">${lbl('Weekly challenge', `<span class="pill ${ch.done ? 'g' : ''}">${ch.done ? 'Done' : ch.days_left + 'd left'}</span>`)}<div class="b">${esc(ch.name)}</div><div class="sm mut">${esc(ch.desc)}</div>
+    <div class="bar mt8 ${ch.done ? 'g' : ''}"><i style="width:${clamp01(ch.have / ch.goal * 100)}%"></i></div>
+    <div class="row between xs mut mt4"><span>${f(ch.have)} / ${f(ch.goal)}</span><span>+${ch.reward} XP${ch.completed < 4 ? ` · ${ch.completed}/4 toward the Third Eye avatar` : ''}</span></div></section>`;
+}
 function vToday() {
   const T = S.today, L = T.level, sv = T.streak, u = T.user, floor = T.daily_min, m = T.today.total;
   let h = `<section class="card hero">
-    <div class="row between"><div class="row g12">${avatar(u.emoji, u.color, 'lg', L.rank)}<div><div class="h2">${esc(u.display)}</div><div class="rankline">${emblem(L.rank, 18)}<span>${esc(L.rank)}</span><span class="mut">· Lv ${L.level}</span></div></div></div>
+    <div class="row between"><div class="row g12">${avatar(u.emoji, u.color, 'lg', L.rank, u)}<div><div class="h2">${esc(u.display)}</div><div class="rankline">${emblem(L.rank, 18)}<span>${esc(L.rank)}</span><span class="mut">· Lv ${L.level}</span></div></div></div>
       <div class="streak ${sv.at_risk ? 'risk' : ''}"><span class="sn">${ic('flame', 20)}${sv.now}</span><span class="xs mut">${sv.at_risk ? 'at risk · ' + streakLeft() : 'day streak'}</span></div></div>
     <div class="bar xp mt12"><i style="width:${L.pct}%"></i></div>
     <div class="row between xs mut mt4"><span>${(L.xp - L.lo).toLocaleString()} / ${(L.hi - L.lo).toLocaleString()} XP to level ${L.level + 1}</span><span data-count="${T.xp_today}" data-ck="xpt" data-pre="+" data-suf=" today">+${T.xp_today.toLocaleString()} today</span></div>
@@ -597,9 +643,11 @@ function vToday() {
     ${T.chest.available ? `<button class="btn-p btn-xl mt12" data-act="chest">Open today's chest</button>` : T.chest.opened ? `<div class="xs mut mt8">Today's chest: <b class="tx">${esc(T.chest.reward)}</b></div>` : ''}
     ${T.sessions.length ? `<div class="lbl2">Blocks today</div>${T.sessions.map(s => `<div class="q"><i class="sd" style="background:${SCOL[s.subject]}"></i><div class="grow">${esc(s.subject)}</div><b class="num">${fm(s.minutes)}</b><span class="xs mut w64">${s.kind === 'timer' ? 'Verified' : 'Manual'}</span>${s.kind === 'manual' ? `<button class="btn-s ico" data-act="delFocus" data-id="${s.id}" aria-label="Remove">${ic('x', 14)}</button>` : ''}</div>`).join('')}` : ''}</section>`;
 
+  h += seasonStrip(T);
   /* quests */
   h += `<section class="card">${lbl('Daily quests', `${T.quests.filter(q => q.done).length}/${T.quests.length}`)}${T.quests.map(q => `<div class="q"><div class="chk ${q.done ? 'on' : ''}">${q.done ? ic('check', 14) : ''}</div><div class="grow">${esc(q.text)}<div class="bar thin mt4"><i style="width:${Math.min(q.prog / Math.max(q.goal, 1) * 100, 100)}%"></i></div></div><span class="pill">+${q.xp}</span></div>`).join('')}</section>`;
 
+  h += chalCard(T);
   /* promises */
   h += `<section class="card">${lbl("Today's promises")}${T.plan.length ? T.plan.map(pl => `<div class="q"><button class="chk ${pl.done ? 'on' : ''}" data-act="togglePlan" data-id="${pl.id}" aria-label="Toggle">${pl.done ? ic('check', 14) : ''}</button><div class="grow ${pl.done ? 'mut' : ''}">${esc(pl.text)}${pl.cue ? `<div class="xs mut">${esc(pl.cue)}</div>` : ''}</div><button class="btn-s ico" data-act="delPlan" data-id="${pl.id}" aria-label="Delete">${ic('x', 14)}</button></div>`).join('') : '<div class="mut sm">Nothing planned. A plan made at night beats willpower in the morning.</div>'}
     <details data-k="plan"><summary>Add a promise</summary><input id="pl_t" placeholder="e.g. Integration Ex 7.2 Q1-10" maxlength="120"><div style="height:6px"></div><input id="pl_c" placeholder="When and where? e.g. 6 PM, desk, phone in another room" maxlength="120"><div class="row g8 mt8"><button class="grow" data-act="addPlan" data-v="today">Add for today</button><button class="grow" data-act="addPlan" data-v="tomorrow">Add for tomorrow</button></div></details>
@@ -613,6 +661,22 @@ function vToday() {
 const PK = { week: ['week_xp', 'week_min'], month: ['month_xp', 'month_min'], all: ['all_xp', 'all_min'] };
 const pv = m => ({ xp: m[PK[S.crewPeriod][0]], min: m[PK[S.crewPeriod][1]] });
 const crewSorted = C => C.members.slice().sort((a, b) => pv(b).xp - pv(a).xp);
+function vSeason(x) {
+  if (!x) return '';
+  if (!x.n) return `<section class="card hero">${lbl('Season 1')}<div class="sm">Starts in ${x.days_to_start} days.</div></section>`;
+  const me = x.rows.find(r => r.me), medal = ['1st', '2nd', '3rd'], fmv = (v, u) => u === 'min' ? fm(v) : `${v} ${u}`;
+  let h = `<section class="card hero seasonc">${lbl(`Season ${x.n}`, `<span class="pill">Day ${x.day} / ${x.days} · ${x.days_left}d left</span>`)}
+    <div class="bar thin"><i style="width:${clamp01(x.day / x.days * 100)}%"></i></div>
+    <div class="prizes">${x.prizes.map((p, i) => `<div class="prize p${i + 1}"><b>${medal[i]}</b><span>${p.toLocaleString()} XP</span>${i === 0 ? '<small>+ Gold Crown frame</small>' : ''}</div>`).join('')}</div>
+    <div class="xs mut">Category wins pay ${x.cat_prize.toLocaleString()} XP each. Prizes go to players who put in ${x.min_hours}h verified and ${x.min_floor} floor days. No shortcuts, no manual logs.</div>`;
+  if (me) h += `<div class="lbl2">Your qualification</div><div class="qual"><div class="row between xs mut"><span>Verified focus</span><span>${me.hours}h / ${x.min_hours}h</span></div><div class="bar thin"><i style="width:${clamp01(me.hours / x.min_hours * 100)}%"></i></div>
+    <div class="row between xs mut mt4"><span>Floor days</span><span>${me.floor_days} / ${x.min_floor}</span></div><div class="bar thin"><i style="width:${clamp01(me.floor_days / x.min_floor * 100)}%"></i></div></div>`;
+  h += `<div class="lbl2">Standings</div>${x.rows.map(r => `<div class="srow ${r.me ? 'me' : ''} ${r.eligible ? '' : 'dim'}" data-act="profile" data-id="${r.id}"><div class="rk">${r.place ? `<span class="medal m${r.place}">${r.place}</span>` : r.rank}</div>${avatar(r.emoji, r.color, 'sm', null, r)}
+    <div class="grow"><div class="lbn"><b class="ell">${esc(r.name)}</b>${r.me ? '<span class="you">you</span>' : ''}</div><div class="xs mut">${r.hours}h · ${r.floor_days}d floor${r.eligible ? '' : ' · qualifying'}</div></div><b class="num">${r.xp.toLocaleString()}</b></div>`).join('')}`;
+  if (x.cats.length) h += `<div class="lbl2">Category leaders · ${x.cat_prize.toLocaleString()} XP each</div><div class="cats">${x.cats.map(c => `<div class="cat ${c.me ? 'me' : ''}"><div class="xs mut">${esc(c.label)}</div><div><b>${esc(c.emoji)} ${esc(c.name)}</b></div><div class="xs mut">${fmv(c.value, c.unit)}</div></div>`).join('')}</div>`;
+  if (x.hall.length) h += `<div class="lbl2">Hall of fame</div>${x.hall.map(d => `<div class="hof"><b>Season ${d.season}</b><div class="xs">${d.podium.map((p, i) => `${medal[i]} ${esc(p.emoji)} ${esc(p.name)}`).join('  ·  ')}</div></div>`).join('')}`;
+  return h + '</section>';
+}
 function vCrew() {
   const C = S.crew;
   if (!C.crew) return `<section class="card"><h2>No crew yet</h2><p class="mut sm">Competition works. Join your friends.</p><input id="cj" placeholder="Invite code" autocapitalize="characters"><button class="btn-p btn-xl mt8" data-act="joinCrew">Join crew</button><div class="mut xs c" style="margin:12px 0">or</div><input id="cn" placeholder="New crew name"><button class="btn-xl mt8" data-act="createCrew">Create crew</button></section>`;
@@ -625,17 +689,18 @@ function vCrew() {
     <div class="sm mt12">${gap}</div>
     ${C.crown ? `<div class="crownline">${ic('crown', 15)}<span><b>${esc(C.crown.name)}</b> ${esc(C.crown.emoji)} held the crown last week with ${C.crown.xp.toLocaleString()} XP</span></div>` : ''}</section>`;
 
+  h += vSeason(C.season);
   const dotOf = m => m.live ? '<span class="dot live"></span>' : m.qualified ? '<span class="dot g"></span>' : m.today_min > 0 ? '<span class="dot y"></span>' : '<span class="dot"></span>';
   const nudgeBtn = m => !m.me && !m.qualified ? `<button class="btn-s nudge" ${m.nudged ? 'disabled' : ''} data-act="nudge" data-id="${m.id}">${m.nudged ? 'Nudged' : 'Nudge'}</button>` : '';
   const podium = sorted.length >= 3, off = podium ? 3 : 0;
-  const podCell = (m, i) => { const p = pv(m); return `<div class="pod p${i + 1} ${m.me ? 'me' : ''}" data-act="profile" data-id="${m.id}"><div class="pav">${i === 0 ? `<span class="pcrown">${ic('crown', 18)}</span>` : ''}${avatar(m.emoji, m.color, i === 0 ? 'xl' : 'lg', m.level.rank)}</div>
+  const podCell = (m, i) => { const p = pv(m); return `<div class="pod p${i + 1} ${m.me ? 'me' : ''}" data-act="profile" data-id="${m.id}"><div class="pav">${i === 0 ? `<span class="pcrown">${ic('crown', 18)}</span>` : ''}${avatar(m.emoji, m.color, i === 0 ? 'xl' : 'lg', m.level.rank, m)}</div>
       <div class="pn ell">${dotOf(m)} ${esc(m.display)}${m.me ? ' <span class="you">you</span>' : ''}</div><div class="xs mut ell row g4 center">${emblem(m.level.rank, 13)}${esc(m.level.rank)}</div>
       <div class="px num">${p.xp.toLocaleString()}</div><div class="xs mut">XP · ${fm(p.min)}</div>${nudgeBtn(m)}<div class="pbase"><b>${i + 1}</b></div></div>`; };
   h += `<section class="card">${seg([['week', 'Week'], ['month', 'Month'], ['all', 'All time']], S.crewPeriod, 'crewPeriod')}
     ${podium ? `<div class="podium">${[1, 0, 2].map(i => podCell(sorted[i], i)).join('')}</div>` : `<div class="lbl2">${{ week: "This week's league", month: 'This month', all: 'All-time legends' }[S.crewPeriod]}</div>`}
     ${sorted.slice(off).map((m, j) => {
     const i = j + off, p = pv(m);
-    return `<div class="lb ${m.me ? 'me' : ''}" data-uid="${m.id}"><div class="rk">${i + 1}</div><span data-act="profile" data-id="${m.id}" style="cursor:pointer">${avatar(m.emoji, m.color, '', m.level.rank)}</span>
+    return `<div class="lb ${m.me ? 'me' : ''}" data-uid="${m.id}"><div class="rk">${i + 1}</div><span data-act="profile" data-id="${m.id}" style="cursor:pointer">${avatar(m.emoji, m.color, '', m.level.rank, m)}</span>
       <div class="grow lbm" data-act="profile" data-id="${m.id}" style="cursor:pointer"><div class="lbn"><b class="ell">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dotOf(m)}</div>
         <div class="xs mut ell row g4">${emblem(m.level.rank, 13)}${esc(m.level.rank)} · Lv ${m.level.level} · ${ic('flame', 11)}${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span class="live-t">live: ${esc(m.live.subject)}</span>` : ''}</div>
         <div class="bar thin mt4"><i style="width:${Math.round(p.xp / top * 100)}%;background:${esc(m.color)}"></i></div></div>
@@ -655,7 +720,7 @@ function vCrew() {
   const others = C.members.filter(m => !m.me);
   h += `<section class="card">${lbl('Duels')}${C.duels.length ? C.duels.map(d => `<div class="q"><div class="grow"><b>${esc(d.an)}</b> vs <b>${esc(d.bn)}</b> <span class="xs mut">${d.days}d · most focus minutes wins</span>${d.status === 'active' ? `<div class="xs">${fm(d.a_min)} vs ${fm(d.b_min)} · ends ${esc(d.end)}</div>` : '<div class="xs mut">Waiting for accept…</div>'}</div>${d.status === 'pending' && d.b === C.me ? `<button class="btn-p btn-s" data-act="acceptDuel" data-id="${d.id}">Accept</button>` : ''}</div>`).join('') : '<div class="mut sm">No duels running. Pick a rival.</div>'}
     ${others.length ? `<div class="row g8 mt12"><select id="du_o">${others.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('')}</select><select id="du_d" style="width:84px"><option value="3">3d</option><option value="7" selected>7d</option><option value="14">14d</option></select><button data-act="duel">Challenge</button></div>` : ''}</section>`;
-  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm')}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
+  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
     <div class="rxrow">${['🔥', '💪', '👏', '😤', '🫡'].map(e => `<button class="rx ${f.mine === e ? 'me' : ''}" data-act="react" data-id="${f.id}" data-e="${e}">${e}${f.reactions[e] ? ' ' + f.reactions[e] : ''}</button>`).join('')}</div></div>`).join('') : '<div class="mut sm">Quiet. Be the first to move.</div>'}</section>`;
   return h;
 }
@@ -746,11 +811,27 @@ function vReflect() {
 }
 
 /* ---------- ME ---------- */
+function vLocker() {
+  const K = S.shop; if (!K) return '';
+  const u = S.user, eq = K.equipped, tab = S.lockTab || 'frame', order = { L: 0, E: 1, R: 2, C: 3 };
+  const prev = it => it.kind === 'frame' ? avatar(u.emoji, u.color, 'lg', null, { fr: it.id, av: eq.avatar }) : avatar(u.emoji, u.color, 'lg', null, { av: it.id, fr: eq.frame });
+  const list = K.items.filter(i => i.kind === tab).sort((a, b) => (b.owned - a.owned) || (order[a.rarity] - order[b.rarity]) || ((a.price || 0) - (b.price || 0)));
+  const card = it => {
+    const on = eq[it.kind] === it.id; let act;
+    if (it.owned) act = on ? `<button data-act="equipItem" data-kind="${it.kind}" data-item="">Unequip</button>` : `<button class="btn-p" data-act="equipItem" data-kind="${it.kind}" data-item="${it.id}">Equip</button>`;
+    else if (it.price != null) act = K.wallet >= it.price ? `<button class="btn-p" data-act="buyItem" data-id="${it.id}">${it.price.toLocaleString()} XP</button>` : `<button disabled>${(it.price - K.wallet).toLocaleString()} XP to go</button>`;
+    else act = `<div class="xs mut">${esc(it.how)}</div>${it.prog ? `<div class="bar thin mt4"><i style="width:${clamp01(it.prog.have / it.prog.need * 100)}%"></i></div><div class="xs mut mt4">${it.prog.have} / ${it.prog.need} ${esc(it.prog.unit)}</div>` : ''}`;
+    return `<div class="lk-i ${on ? 'on' : ''} ${it.owned ? '' : 'locked'}" style="--rc:${RC[it.rarity]}">${prev(it)}<div class="rn">${esc(it.rname)}${it.price == null && !it.owned ? ' · earn' : ''}</div><div class="nm">${esc(it.name)}</div>${act}</div>`;
+  };
+  return `<section class="card">${lbl('Locker', `<span class="pill">${K.wallet.toLocaleString()} XP to spend</span>`)}
+    <div class="sm mut">Hard work is the currency. Spending XP never lowers your level or rank, only the balance you can spend. Some items cannot be bought: earn them.</div>
+    ${seg([['frame', 'Frames'], ['avatar', 'Avatars']], tab, 'lockTab')}<div class="lk">${list.map(card).join('')}</div></section>`;
+}
 function vMe() {
   const I = S.ins, u = S.user, L = I.level, e = I.evidence, og = I.outgrow, pct = Math.round(og.ratio * 100);
   const hm = I.heat.map(c => { const a = c.f ? '#5aa9ff66' : c.m === 0 ? '#17171c' : `rgba(124,106,247,${Math.min(.25 + c.m / 240 * .75, 1)})`; return `<i title="${esc(c.d)}: ${fm(c.m)}${c.f ? ' (freeze)' : ''}" style="background:${a}"></i>`; }).join('');
   const hrmx = Math.max(...I.hours, 1), best = I.hours.indexOf(Math.max(...I.hours));
-  let h = `<section class="card hero"><div class="row g12">${avatar(u.emoji, u.color, 'xl', L.rank)}<div class="grow"><h2>${esc(u.display)}</h2><div class="rankline">${emblem(L.rank, 18)}<span>${esc(L.rank)}</span><span class="mut">· Level ${L.level} · ${L.xp.toLocaleString()} XP</span></div></div></div>
+  let h = `<section class="card hero"><div class="row g12">${avatar(u.emoji, u.color, 'xl', L.rank, u)}<div class="grow"><h2>${esc(u.display)}</h2><div class="rankline">${emblem(L.rank, 18)}<span>${esc(L.rank)}</span><span class="mut">· Level ${L.level} · ${L.xp.toLocaleString()} XP</span></div></div></div>
     <div class="bar xp mt12"><i style="width:${L.pct}%"></i></div>
     <button class="btn-xl mt12" data-act="shareCard">Share my stat card</button><details data-k="ladder"><summary>Title ladder · ${I.ladder.length} titles · ${L.next_rank ? 'next: ' + esc(L.next_rank) + ' at Lv ' + L.next_at : 'top title reached'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .4}"><span class="lad-e">${emblem(r.rank, 26)}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">you</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(r.xp || 0).toLocaleString()} XP</span></div>`).join('')}</details></section>`;
   h += `<section class="card">${lbl('The Ragda meter')}<p class="sm mut">Your last 7 days against the old A+ you (${og.baseline_h}h a day).</p><div class="row between"><div class="bignum" style="color:${pct >= 100 ? 'var(--good)' : 'var(--tx)'}">${pct}%</div><div class="sm rt-text">${pct >= 130 ? 'You are Ragdamaxed. The old you cannot keep up.' : pct >= 100 ? 'You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
@@ -782,6 +863,7 @@ function vMe() {
   if (I.hours.some(x => x)) h += `<section class="card">${lbl('Your best focus hours')}<div class="hrs">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut mt4"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm mt8">Peak: <b>${best % 12 || 12}${best < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></section>`;
   if (Object.keys(I.sub7).length) { const tot = Object.values(I.sub7).reduce((a, b) => a + b, 0); h += `<section class="card">${lbl('Subject balance', '7 days')}${Object.entries(I.sub7).sort((a, b) => b[1] - a[1]).map(([s, m]) => `<div class="row g8" style="margin:8px 0"><span class="sm w78">${esc(s)}</span><div class="bar grow"><i style="width:${m / tot * 100}%;background:${SCOL[s] || '#9a9aa8'}"></i></div><span class="xs mut w56 r">${fm(m)}</span></div>`).join('')}</section>`; }
   if (I.urge_triggers.length) h += `<section class="card">${lbl('Your triggers')}<div class="chips">${I.urge_triggers.map(t => `<span class="pill">${esc(t.trigger)} ×${t.n}</span>`).join('')}</div></section>`;
+  h += vLocker();
   h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge r-${b.rarity} ${b.got ? '' : 'off'}"><s><i>${esc(b.emoji)}</i></s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div><div class="rar">${esc(b.rname)} · +${b.xp} XP · held by ${b.holders}/${b.total}</div></div>`).join('')}</div></section>`;
   if (u.admin) h += `<section class="card">${lbl('Server')}<p class="sm mut">You run this crew. Live stats, PIN resets, moderation, backups.</p><button class="btn-xl" data-act="admin">Open server dashboard</button></section>`;
   h += `<section class="card">${lbl('Settings')}<label>Display name</label><input id="s_name" value="${esc(u.display)}" maxlength="20"><label>Identity: "I am becoming someone who…"</label><input id="s_id" value="${esc(u.identity)}" placeholder="shows up before he feels like it" maxlength="140">
@@ -931,6 +1013,13 @@ const A = {
   async logAndExitFocus() { if (S.today?.pomo && !(await confirmSheet('End the pomodoro plan and log this block?', 'End and log'))) return; try { await finishTimer(); } catch (e) { } },
 };
 Object.assign(A, {
+  lockTab(el) { S.lockTab = el.dataset.v; render(); },
+  async buyItem(el) {
+    const it = S.shop && S.shop.items.find(x => x.id === el.dataset.id); if (!it) return;
+    if (!(await confirmSheet(`Buy ${it.name} for ${it.price.toLocaleString()} XP? Your level and rank stay exactly the same.`, 'Buy'))) return;
+    const r = await api('shop/buy', { item: it.id }); S.user = r.user; S.shop = await api('shop'); render();
+  },
+  async equipItem(el) { const r = await api('shop/equip', { kind: el.dataset.kind, item: el.dataset.item || '' }); S.user = r.user; try { S.shop = await api('shop'); } catch (e) { } closeModal(); render(); },
   async startSuggest(el) { S.pickSub = el.dataset.sub; PREF.set('sub', S.pickSub); thinkToast(await api('timer/start', { subject: el.dataset.sub, target: +el.dataset.dur, mode: 'timer' })); await refresh(); },
   obNext() { obRead(); onboard(Math.min(3, (S.obStep || 1) + 1)); },
   obBack() { obRead(); onboard(Math.max(1, (S.obStep || 1) - 1)); },
@@ -1031,7 +1120,7 @@ function vChat() {
   if (!CH.open) return vThreads();
   const t = CH.threads.find(x => x.key === CH.open) || {};
   const head = t.kind === 'dm'
-    ? `<div class="av" style="width:30px;height:30px;font-size:15px;background:${esc(t.color)}33">${esc(t.emoji)}</div><b>${esc(t.title)}</b><span class="xs mut">private</span>`
+    ? `${avatar(t.emoji, t.color, 'sm', null, CH.people[t.uid])}<b>${esc(t.title)}</b><span class="xs mut">private</span>`
     : `<b># ${esc(t.title || 'crew')}</b><span class="xs mut">whole crew</span>`;
   return `<div class="chat"><div class="chat-h row"><button class="btn-s" data-act="chatBack">←</button>${head}</div><div class="msgs" id="chat_msgs"></div>
     <div id="chat_ctx"></div><div class="composer"><textarea id="chat_in" rows="1" maxlength="1000" placeholder="${t.kind === 'dm' ? 'Message ' + esc(t.title) : 'Message the crew'}"></textarea><button class="btn-p" data-act="chatSend">Send</button></div></div>`;
@@ -1039,7 +1128,7 @@ function vChat() {
 function vThreads() {
   const row = t => {
     const l = t.last, who = l ? (l.uid === S.user.id ? 'You: ' : t.kind === 'crew' ? esc((CH.people[l.uid] || {}).display || '') + ': ' : '') : '';
-    const av = t.kind === 'crew' ? '<div class="av" style="background:#7c5cff33;border:2px solid #7c5cff">#</div>' : `<div class="av" style="background:${esc(t.color)}33;border:2px solid ${esc(t.color)}">${esc(t.emoji)}</div>`;
+    const av = t.kind === 'crew' ? '<div class="av" style="background:#7c5cff33;border:2px solid #7c5cff">#</div>' : avatar(t.emoji, t.color, '', null, CH.people[t.uid]);
     return `<div class="q thread" data-act="chatOpen" data-v="${esc(t.key)}">${av}<div class="grow" style="min-width:0"><div class="row between"><b>${esc(t.title)}</b><span class="xs mut">${l ? ago(l.ts) : ''}</span></div>
       <div class="xs mut ell">${l ? who + esc(l.text) : 'No messages yet'}</div></div>${t.unread ? `<span class="ub">${t.unread}</span>` : ''}</div>`;
   };
@@ -1065,7 +1154,7 @@ function chatPaint(stick) {
     const rx = m.re ? `<div class="rxs">${Object.entries(m.re).map(([e, n]) => `<span class="rx ${m.mine === e ? 'me' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e} ${n}</span>`).join('')}</div>` : '';
     const acts = sel ? `<div class="acts">${CHAT_EMOJIS.map(e => `<button class="${m.mine === e ? 'on' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}<button data-act="chatReply" data-id="${m.id}" title="Reply">↩</button>${canEdit ? `<button data-act="chatEdit" data-id="${m.id}" title="Edit">✏️</button>` : ''}${mine ? `<button data-act="chatDel" data-id="${m.id}" title="Delete">🗑</button>` : ''}</div>` : '';
     const qt = m.reply ? `<div class="qt" data-act="chatJump" data-id="${m.reply.id}"><b>${esc((CH.people[m.reply.uid] || {}).display || 'Member')}</b> ${esc(m.reply.text)}</div>` : '';
-    h += `<div class="msg ${grp ? 'grp' : ''} ${ment ? 'ment' : ''} ${sel ? 'sel' : ''}" data-act="chatSel" data-id="${m.id}" data-mid="${m.id}">${grp ? '<div class="av sp"></div>' : `<div class="av" data-act="profile" data-id="${m.uid}" style="background:${esc(p.color)}33;border:2px solid ${esc(p.color)};cursor:pointer">${esc(p.emoji)}</div>`}
+    h += `<div class="msg ${grp ? 'grp' : ''} ${ment ? 'ment' : ''} ${sel ? 'sel' : ''}" data-act="chatSel" data-id="${m.id}" data-mid="${m.id}">${grp ? '<div class="av sp"></div>' : `<span data-act="profile" data-id="${m.uid}" style="cursor:pointer">${avatar(p.emoji, p.color, '', null, p)}</span>`}
       <div class="mb">${grp ? '' : `<div class="mh"><b style="color:${esc(p.color)}" data-act="chatMention" data-v="${esc(p.display)}">${esc(p.display)}</b><span class="xs mut">${chatClock(m.ts)}</span></div>`}${qt}<div class="mt">${chatFmt(m.text)}${m.edited ? ' <span class="xs mut">(edited)</span>' : ''}</div>${rx}${acts}</div></div>`;
     prev = m;
   });

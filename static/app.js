@@ -247,6 +247,7 @@ const avatar = (emo, col, cls = '', rank = null, cos = null) => {
   const st = `background:${sk ? `radial-gradient(circle at 50% 30%,${c}44,#0c0c12 72%)` : esc(col) + '22'};border-color:${esc(c)}${!fr && i >= 3 ? `;--tc:${TIER_COL[i]}` : ''}`;
   return `<div class="av ${cls}${fx}${sk ? ' sk' : ''}" style="${st}">${sk ? SIGIL[sk] : esc(emo)}</div>`;
 };
+const tn = rank => tierIdx(rank) >= 5 ? ` tn-hi" style="--tc:${TIER_COL[tierIdx(rank)]}` : '';
 const CAT_LABEL = { hours: 'Most Hours', improved: 'Most Improved', streak: 'Iron Streak', deep: 'Deep Diver', early: 'Early Bird' };
 const titleChips = ts => (ts && ts.length) ? `<div class="row wrap g4 mt8">${ts.map(t => (t.place ? `<span class="pill gold">${t.place === 1 ? 'Season ' + t.season + ' Champion' : 'Season ' + t.season + ' · #' + t.place}</span>` : '') + t.cats.map(k => `<span class="pill gold">S${t.season} ${esc(CAT_LABEL[k] || k)}</span>`).join('')).join('')}</div>` : '';
 
@@ -694,14 +695,14 @@ function vCrew() {
   const nudgeBtn = m => !m.me && !m.qualified ? `<button class="btn-s nudge" ${m.nudged ? 'disabled' : ''} data-act="nudge" data-id="${m.id}">${m.nudged ? 'Nudged' : 'Nudge'}</button>` : '';
   const podium = sorted.length >= 3, off = podium ? 3 : 0;
   const podCell = (m, i) => { const p = pv(m); return `<div class="pod p${i + 1} ${m.me ? 'me' : ''}" data-act="profile" data-id="${m.id}"><div class="pav">${i === 0 ? `<span class="pcrown">${ic('crown', 18)}</span>` : ''}${avatar(m.emoji, m.color, i === 0 ? 'xl' : 'lg', m.level.rank, m)}</div>
-      <div class="pn ell">${dotOf(m)} ${esc(m.display)}${m.me ? ' <span class="you">you</span>' : ''}</div><div class="xs mut ell row g4 center">${emblem(m.level.rank, 13)}${esc(m.level.rank)}</div>
+      <div class="pn ell${tn(m.level.rank)}">${dotOf(m)} ${esc(m.display)}${m.me ? ' <span class="you">you</span>' : ''}</div><div class="xs mut ell row g4 center">${emblem(m.level.rank, 13)}${esc(m.level.rank)}</div>
       <div class="px num">${p.xp.toLocaleString()}</div><div class="xs mut">XP · ${fm(p.min)}</div>${nudgeBtn(m)}<div class="pbase"><b>${i + 1}</b></div></div>`; };
   h += `<section class="card">${seg([['week', 'Week'], ['month', 'Month'], ['all', 'All time']], S.crewPeriod, 'crewPeriod')}
     ${podium ? `<div class="podium">${[1, 0, 2].map(i => podCell(sorted[i], i)).join('')}</div>` : `<div class="lbl2">${{ week: "This week's league", month: 'This month', all: 'All-time legends' }[S.crewPeriod]}</div>`}
     ${sorted.slice(off).map((m, j) => {
     const i = j + off, p = pv(m);
     return `<div class="lb ${m.me ? 'me' : ''}" data-uid="${m.id}"><div class="rk">${i + 1}</div><span data-act="profile" data-id="${m.id}" style="cursor:pointer">${avatar(m.emoji, m.color, '', m.level.rank, m)}</span>
-      <div class="grow lbm" data-act="profile" data-id="${m.id}" style="cursor:pointer"><div class="lbn"><b class="ell">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dotOf(m)}</div>
+      <div class="grow lbm" data-act="profile" data-id="${m.id}" style="cursor:pointer"><div class="lbn"><b class="ell${tn(m.level.rank)}">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dotOf(m)}</div>
         <div class="xs mut ell row g4">${emblem(m.level.rank, 13)}${esc(m.level.rank)} · Lv ${m.level.level} · ${ic('flame', 11)}${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span class="live-t">live: ${esc(m.live.subject)}</span>` : ''}</div>
         <div class="bar thin mt4"><i style="width:${Math.round(p.xp / top * 100)}%;background:${esc(m.color)}"></i></div></div>
       <div class="lbx"><b class="num">${p.xp.toLocaleString()}</b><div class="xs mut">XP · ${fm(p.min)}</div>${nudgeBtn(m)}</div></div>`;
@@ -720,7 +721,7 @@ function vCrew() {
   const others = C.members.filter(m => !m.me);
   h += `<section class="card">${lbl('Duels')}${C.duels.length ? C.duels.map(d => `<div class="q"><div class="grow"><b>${esc(d.an)}</b> vs <b>${esc(d.bn)}</b> <span class="xs mut">${d.days}d · most focus minutes wins</span>${d.status === 'active' ? `<div class="xs">${fm(d.a_min)} vs ${fm(d.b_min)} · ends ${esc(d.end)}</div>` : '<div class="xs mut">Waiting for accept…</div>'}</div>${d.status === 'pending' && d.b === C.me ? `<button class="btn-p btn-s" data-act="acceptDuel" data-id="${d.id}">Accept</button>` : ''}</div>`).join('') : '<div class="mut sm">No duels running. Pick a rival.</div>'}
     ${others.length ? `<div class="row g8 mt12"><select id="du_o">${others.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('')}</select><select id="du_d" style="width:84px"><option value="3">3d</option><option value="7" selected>7d</option><option value="14">14d</option></select><button data-act="duel">Challenge</button></div>` : ''}</section>`;
-  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
+  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed k-${esc(f.kind || '')}"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
     <div class="rxrow">${['🔥', '💪', '👏', '😤', '🫡'].map(e => `<button class="rx ${f.mine === e ? 'me' : ''}" data-act="react" data-id="${f.id}" data-e="${e}">${e}${f.reactions[e] ? ' ' + f.reactions[e] : ''}</button>`).join('')}</div></div>`).join('') : '<div class="mut sm">Quiet. Be the first to move.</div>'}</section>`;
   return h;
 }

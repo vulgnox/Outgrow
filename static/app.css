@@ -262,3 +262,15 @@ input:focus-visible,textarea:focus-visible,select:focus-visible{outline:0}
 .cats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 .cat{border:1px solid var(--line2);border-radius:12px;padding:8px 10px;background:var(--s2);min-width:0}.cat.me{border-color:var(--acc)}
 .hof{padding:8px 0;border-bottom:1px solid var(--line)}.hof:last-child{border:0}
+/* competitive flair */
+.tn-hi{background:linear-gradient(90deg,#fff,var(--tc));-webkit-background-clip:text;background-clip:text;color:transparent}
+.pod.p1 .pbase{box-shadow:0 -8px 24px -8px #f5b83d55}
+.pod.p1 .px{color:var(--warn)}
+.feed.k-season,.feed.k-cosmetic,.feed.k-challenge,.feed.k-record{border-left:2px solid var(--warn);padding-left:10px}
+.feed.k-season{background:linear-gradient(90deg,#2a200855,transparent)}
+/* competitive flair */
+.tn-hi{background:linear-gradient(90deg,#fff,var(--tc));-webkit-background-clip:text;background-clip:text;color:transparent}
+.pod.p1 .pbase{box-shadow:0 -8px 24px -8px #f5b83d55}
+.pod.p1 .px{color:var(--warn)}
+.feed.k-season,.feed.k-cosmetic,.feed.k-challenge,.feed.k-record{border-left:2px solid var(--warn);padding-left:10px}
+.feed.k-season{background:linear-gradient(90deg,#2a200855,transparent)}

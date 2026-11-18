@@ -131,6 +131,7 @@ details summary{cursor:pointer;color:var(--mut);padding:10px 0 4px;font-size:13p
 .chat-h{padding:4px 2px 10px;border-bottom:1px solid var(--line);flex:none}
 .msgs{flex:1;overflow-y:auto;padding:10px 0;overscroll-behavior:contain}
 .msg{display:flex;gap:10px;padding:4px;border-radius:10px;cursor:pointer}.msg:hover{background:#ffffff06}.msg.grp{padding-top:0;padding-bottom:1px}.msg.sel{background:var(--accbg)}
+.msgs .msg{content-visibility:auto;contain-intrinsic-size:auto 64px}
 .msg .av{width:34px;height:34px}.msg .av.sp{background:none;border:0}
 .msg.ment{border-left:2px solid var(--warn);background:#f2b44110}
 .mb{min-width:0;flex:1}.mh{display:flex;gap:8px;align-items:baseline}.mh b{cursor:pointer}
@@ -274,3 +275,81 @@ input:focus-visible,textarea:focus-visible,select:focus-visible{outline:0}
 .pod.p1 .px{color:var(--warn)}
 .feed.k-season,.feed.k-cosmetic,.feed.k-challenge,.feed.k-record{border-left:2px solid var(--warn);padding-left:10px}
 .feed.k-season{background:linear-gradient(90deg,#2a200855,transparent)}
+
+/* ===== UI v2: floating dock, title bar, bell, floating sub-tabs, crew sections, diary ===== */
+:root{--nav:74px}
+#app.enter>*{animation:rise .45s cubic-bezier(.2,.8,.2,1) both}
+#app.enter>*:nth-child(3){animation-delay:.05s}#app.enter>*:nth-child(4){animation-delay:.1s}#app.enter>*:nth-child(n+5){animation-delay:.15s}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}}
+@media (prefers-reduced-motion:reduce){#app.enter>*{animation:none}}
+.topbar{height:46px;display:flex;align-items:center}
+.topbar h1{font-size:24px;font-weight:800;letter-spacing:-.03em}
+
+.nav{background:none;border:0;backdrop-filter:none;-webkit-backdrop-filter:none;bottom:calc(10px + env(safe-area-inset-bottom));padding:0;pointer-events:none}
+.nav>div{pointer-events:auto;width:max-content;max-width:calc(100% - 20px);gap:2px;padding:5px;border-radius:22px;background:#111115ee;backdrop-filter:blur(18px) saturate(1.4);-webkit-backdrop-filter:blur(18px) saturate(1.4);border:1px solid var(--line2);box-shadow:0 12px 40px #000c}
+.nav button{flex:none;flex-direction:row;gap:0;height:auto;padding:11px 13px;border-radius:17px;font-size:13px;font-weight:600;letter-spacing:0;transition:background .3s,color .3s,padding .3s cubic-bezier(.2,.8,.2,1)}
+.nav button span{max-width:0;opacity:0;overflow:hidden;white-space:nowrap;margin-left:0;transition:max-width .35s cubic-bezier(.2,.8,.2,1),opacity .25s,margin .35s}
+.nav button.on,.nav button.on:hover:not(:disabled){background:var(--accbg);box-shadow:0 0 0 1px #7c6af755 inset;padding:11px 15px}
+.nav button.on span{max-width:72px;opacity:1;margin-left:8px}
+.nav .nb{top:3px;left:auto;right:3px}
+
+#bell{position:fixed;top:calc(8px + env(safe-area-inset-top));right:12px;z-index:18;width:42px;height:42px;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#111115ee;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line2);box-shadow:0 8px 26px #000a;color:var(--tx2)}
+#bell .nb{top:-3px;right:-3px;left:auto}
+.feed.isnew{border-left:2px solid var(--acc);padding-left:10px}
+
+.float{position:sticky;top:calc(54px + env(safe-area-inset-top));z-index:12;margin:6px 0 10px;padding:4px 0 6px;background:linear-gradient(var(--bg) 72%,transparent)}
+.float .seg{overflow-x:auto;scrollbar-width:none;box-shadow:0 8px 24px #0009;background:#111115f2}
+.float .seg::-webkit-scrollbar{display:none}
+.float .seg button{flex:none;white-space:nowrap;padding:8px 14px}
+
+.chat{height:calc(100dvh - var(--nav) - 80px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+
+.tiles .tile{cursor:pointer;display:block;text-align:center}.tiles .tile b{display:block;font-size:20px}
+.starter{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}
+.starter .st{background:var(--s2);border:1px solid var(--line2);border-radius:14px;padding:8px 0;display:flex;justify-content:center}
+.starter .st.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset;background:var(--accbg)}
+
+.diary-ta{min-height:190px;line-height:1.55;font-size:15.5px;margin-top:10px;resize:vertical}
+.monthsep{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:18px 2px 4px}
+.entry{background:var(--s2);border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0;cursor:pointer;transition:border-color .2s}
+.entry.open{border-color:var(--line2)}
+.entry .etext{white-space:pre-wrap;word-break:break-word;font-size:14.5px;line-height:1.5;margin-top:8px;color:var(--tx2)}
+.entry:not(.open) .etext{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.otd{border-left:2px solid var(--warn);padding:2px 10px;margin:8px 0}
+
+/* ===== Lordran pack: animated sigils + auras ===== */
+.av.sk svg .eyeg,.av.sk svg .liq{animation:eyeg 2.4s ease-in-out infinite}
+@keyframes eyeg{50%{opacity:.3}}
+.av.sk svg .rays,.av.sk svg .dsring{transform-box:view-box;transform-origin:50% 50%;animation:fxspin 14s linear infinite}
+.av.sk svg .dsring{animation-duration:9s;animation-direction:reverse}
+.av.sk svg .fl,.av.sk svg .fl2{transform-box:fill-box;transform-origin:50% 100%;animation:flick .9s ease-in-out infinite}
+.av.sk svg .fl2{animation-duration:.6s;animation-delay:-.3s}
+@keyframes flick{0%,100%{transform:scale(1,1)}40%{transform:scale(.92,1.09)}70%{transform:scale(1.06,.94)}}
+.av.sk svg .wing{transform-box:fill-box;transform-origin:50% 50%;animation:flap 1.8s ease-in-out infinite}
+@keyframes flap{50%{transform:scaleX(.78)}}
+.av[class*=" fx-"]::before{content:"";position:absolute;pointer-events:none}
+.fx-fog::after{background:conic-gradient(#f4f6fa,#8e97a8,#e9edf5,#7c8494,#f4f6fa);animation:fogp 3.6s ease-in-out infinite}
+.fx-fog::before{inset:-10px;border-radius:50%;background:radial-gradient(circle,transparent 58%,#cfd6e655 72%,transparent 82%);animation:fogd 5s ease-in-out infinite}
+@keyframes fogp{50%{opacity:.35;transform:scale(1.05)}}@keyframes fogd{50%{transform:scale(1.14);opacity:.45}}
+.fx-flask::after{background:conic-gradient(#ffb020,#fff0b0,#ff8a1a,#ffe08a,#ffb020);animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{0%,100%{filter:drop-shadow(0 0 2px #ffb02066)}50%{filter:drop-shadow(0 0 10px #ffb020ee)}}
+.fx-lightning::after{background:conic-gradient(#1b3b6b,#7de9ff,#fff,#4dd0ff,#1b3b6b);animation:fxspin 1.2s linear infinite,zap 1.7s steps(1) infinite;filter:drop-shadow(0 0 6px #4dd0ffcc)}
+@keyframes zap{0%,100%{opacity:1}8%{opacity:.25}12%{opacity:1}55%{opacity:1}58%{opacity:.3}62%{opacity:1}}
+.fx-humanity::after{background:conic-gradient(#0b0510,#5b21b6,#0b0510 40%,#9333ea,#0b0510);animation:fxspin 4s linear infinite reverse;filter:drop-shadow(0 0 6px #7c3aedaa)}
+.fx-humanity::before{inset:-10px;border-radius:50%;background:radial-gradient(circle at 50% 0,#d8b4fe 0 2.6px,transparent 3.6px),radial-gradient(circle at 50% 100%,#a855f7 0 2px,transparent 3px),radial-gradient(circle at 0 50%,#c084fc 0 1.6px,transparent 2.6px);animation:fxspin 3s linear infinite;filter:drop-shadow(0 0 4px #c084fc)}
+.fx-moonlight::after{background:conic-gradient(#e8f0ff,#6c8cff,#e8f0ff,#93b4ff,#e8f0ff);animation:fxspin 6s linear infinite;filter:drop-shadow(0 0 7px #7aa0ffcc)}
+.fx-moonlight::before{inset:-10px;border-radius:50%;background:radial-gradient(circle at 14% 18%,#fff 0 1.6px,transparent 2.6px),radial-gradient(circle at 88% 26%,#cfe0ff 0 1.4px,transparent 2.4px),radial-gradient(circle at 22% 90%,#fff 0 1.2px,transparent 2.2px),radial-gradient(circle at 92% 82%,#cfe0ff 0 1.6px,transparent 2.6px);animation:twinkle 2.4s ease-in-out infinite}
+@keyframes twinkle{0%,100%{opacity:.2;transform:scale(.96)}50%{opacity:1;transform:scale(1.05)}}
+.fx-sunlight::after{background:repeating-conic-gradient(#ffe08a 0 12deg,#f5b83d 12deg 24deg,#fff3b0 24deg 30deg);animation:fxspin 9s linear infinite;filter:drop-shadow(0 0 7px #f5b83daa)}
+.fx-sunlight::before{inset:-12px;border-radius:50%;background:radial-gradient(circle,#ffd25a33 50%,transparent 72%);animation:sunp 3s ease-in-out infinite}
+@keyframes sunp{50%{transform:scale(1.15);opacity:.5}}
+.fx-kindle::after{background:conic-gradient(#ff3b1f,#ffb020,#ff3b1f,#ffd25a,#ff3b1f);animation:fxspin 2.6s linear infinite;filter:drop-shadow(0 0 7px #ff6a1fcc)}
+.fx-kindle::before,.fx-cinder::before{left:-6px;right:-6px;top:-20px;height:22px;background:radial-gradient(circle at 22% 80%,#ffd25a 0 1.6px,transparent 2.4px),radial-gradient(circle at 50% 60%,#ff8a3c 0 2px,transparent 3px),radial-gradient(circle at 78% 85%,#ffb020 0 1.4px,transparent 2.2px);animation:sparks 1.8s ease-out infinite}
+@keyframes sparks{0%{transform:translateY(8px);opacity:0}25%{opacity:1}100%{transform:translateY(-10px);opacity:0}}
+.fx-abyss::after{background:conic-gradient(#0a0206,#8b0a1a,#0a0206 30%,#ff1f3d,#0a0206 60%,#8b0a1a,#0a0206);animation:fxspin 2.8s linear infinite reverse,abyssp 2.2s ease-in-out infinite}
+@keyframes abyssp{0%,100%{filter:drop-shadow(0 0 3px #8b0a1a)}50%{filter:drop-shadow(0 0 12px #ff1f3d)}}
+.fx-abyss::before{inset:-11px;border-radius:50%;background:radial-gradient(circle,transparent 62%,#ff1f3d33 74%,transparent 84%);animation:abyssg 2.2s ease-in-out infinite}
+@keyframes abyssg{50%{transform:scale(1.14);opacity:.4}}
+.fx-cinder::after{background:conic-gradient(#ff2a00,#ffcf3a,#ff2a00 25%,#3a0a00 50%,#ff5a00,#ffcf3a,#ff2a00);animation:fxspin 1.4s linear infinite;filter:drop-shadow(0 0 10px #ff4a1acc)}
+.fx-cinder{box-shadow:0 0 16px #ff4a1a66}
+@media (prefers-reduced-motion:reduce){.av,.av *,.av::before,.av::after{animation:none!important}}

@@ -88,6 +88,23 @@ function toast(t, sub = '', cls = '') {
   box.appendChild(d); while (box.children.length > 3) box.firstChild.remove();
   setTimeout(() => d.remove(), 3500);
 }
+/* B-01: copy must await the clipboard promise and never toast success it did not get. */
+async function copyText(t, ok = 'Copied') {
+  try {
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(t);
+    else {
+      const ta = document.createElement('textarea'); ta.value = t; ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+      const good = document.execCommand('copy'); ta.remove();
+      if (!good) throw new Error('copy');
+    }
+    toast(ok);
+    return true;
+  } catch (e) {
+    await sheet(`<h2>Copy failed</h2><p class="sm mut mt8">Select the text and copy it manually.</p><input class="inp mt8" readonly value="${esc(t)}" onclick="this.select()"><div class="row g8 mt12"><button class="btn-p btn-lg grow" data-c="1">Done</button></div>`);
+    return false;
+  }
+}
 function confetti() {
   if (reduced()) return;
   const cols = ['#7c6af7', '#a99cff', '#3dd6a0', '#f2b441', '#ececf1'];
@@ -152,7 +169,7 @@ function sheet(html) {
     const onKey = e => { if (e.key === 'Escape') done(null); };
     const done = v => { o.remove(); document.removeEventListener('keydown', onKey); res(v); };
     o.addEventListener('click', e => {
-      const cp = e.target.closest('[data-copy]'); if (cp) { try { navigator.clipboard?.writeText(cp.dataset.copy); toast('Copied'); } catch (x) { } return; }
+      const cp = e.target.closest('[data-copy]'); if (cp) { copyText(cp.dataset.copy); return; }
       const b = e.target.closest('[data-c]'); if (b) done(b.dataset.c); else if (e.target === o) done(null);
     });
     document.addEventListener('keydown', onKey);
@@ -350,8 +367,11 @@ function thinkToast(r) { if (r && r.think_s != null) toast(`Started in ${fsec(r.
 const _jm = /^\/join\/([A-Za-z0-9]{4,12})\/?$/.exec(location.pathname);
 if (_jm) { S.joinCode = _jm[1].toUpperCase(); S.authMode = 'register'; try { history.replaceState(null, '', '/'); } catch (e) { } }
 async function boot() {
-  try { const me = await api('me'); S.user = me.user; sendOpen(); await go(S.tab); if (!S.user.onboarded) onboard(); }
-  catch (e) { if (!S.user) renderAuth(); }
+  try {
+    const me = await api('me'); S.user = me.user;
+    if (!S.user) return renderAuth();   // B-12: a logged-out boot must not fire authenticated calls
+    sendOpen(); await go(S.tab); if (!S.user.onboarded) onboard();
+  } catch (e) { if (!S.user) renderAuth(); }
 }
 /* ---------- timer engine ---------- */
 function setToday(t) {
@@ -1055,7 +1075,7 @@ const A = {
   async react(el) { await api('react', { feed_id: +el.dataset.id, emoji: el.dataset.e }); S.crew = await api('crew'); render(); },
   async duel() { await api('duel', { opponent: +val('du_o'), days: +val('du_d') }); toast('Challenge sent'); await refresh(); },
   async acceptDuel(el) { await api('duel/accept', { id: +el.dataset.id }); await refresh(); },
-  copy(el) { try { navigator.clipboard?.writeText(el.dataset.v); toast(el.dataset.t || 'Invite code copied'); } catch (e) { toast('Copy failed', el.dataset.v); } },
+  async copy(el) { await copyText(el.dataset.v, el.dataset.t || 'Invite code copied'); },
   async saveSettings() {
     const ex = [0, 1, 2].map(i => ({ name: val('s_en' + i) || 'Exam', date: val('s_ed' + i) })).filter(x => x.date);
     const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, color: val('s_col') }); S.user = r.user; try { localStorage.setItem('rg_fx', JSON.stringify(!!($('#s_fx') && $('#s_fx').checked))); } catch (e) { } toast('Saved'); await refresh();
@@ -1205,7 +1225,7 @@ function chatPaint(stick) {
     const grp = prev && prev.uid === m.uid && (new Date(m.ts) - new Date(prev.ts)) < 5 * 60e3;
     const mine = m.uid === S.user.id, sel = CH.sel === m.id;
     const ment = !mine && m.text.toLowerCase().includes('@' + String(S.user.display).toLowerCase());
-    const canEdit = mine && (Date.now() - new Date(m.ts).getTime()) < 24 * 3600e3; // server enforces the real 30 min window
+    const canEdit = mine && (Date.now() - new Date(m.ts).getTime()) < 30 * 60e3; // B-02: match the server window
     const rx = m.re ? `<div class="rxs">${Object.entries(m.re).map(([e, n]) => `<span class="rx ${m.mine === e ? 'me' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e} ${n}</span>`).join('')}</div>` : '';
     const acts = sel ? `<div class="acts">${CHAT_EMOJIS.map(e => `<button class="${m.mine === e ? 'on' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}<button data-act="chatReply" data-id="${m.id}" title="Reply">↩</button>${canEdit ? `<button data-act="chatEdit" data-id="${m.id}" title="Edit">✏️</button>` : ''}${mine ? `<button data-act="chatDel" data-id="${m.id}" title="Delete">🗑</button>` : ''}</div>` : '';
     const qt = m.reply ? `<div class="qt" data-act="chatJump" data-id="${m.reply.id}"><b>${esc((CH.people[m.reply.uid] || {}).display || 'Member')}</b> ${esc(m.reply.text)}</div>` : '';
@@ -1346,7 +1366,7 @@ document.addEventListener('visibilitychange', () => {
 });
 /* unread badge + alerts while you're anywhere except inside a conversation */
 setInterval(async () => {
-  if (!S.user || (S.tab === 'chat' && CH.open)) return;
+  if (!S.user || document.hidden || (S.tab === 'chat' && CH.open)) return;   // P-11: no polling from hidden tabs
   try {
     const res = await fetch('/api/chat/unread'); if (!res.ok) return;
     const r = await res.json(); CH.total = r.total; CH.unread = r.unread; chatBadge();
@@ -1436,10 +1456,15 @@ setInterval(async () => {
   try {
     if (S.tab === 'today') {
       const t = await api('today'), running = !!(S.today?.timer || S.today?.pomo);
+      const before = JSON.stringify(S.today, (k, v) => k === 'events' ? undefined : v);   // P-09 (partial): no repaint when nothing changed
       setToday(t);
       t.live.forEach(l => { const k = l.display + l.subject; if (!seenLive.has(k) && 'Notification' in window && Notification.permission === 'granted') new Notification(`${l.display} is locked in on ${l.subject}`, { body: 'Join them. Start a block.' }); seenLive.add(k); });
-      if (!(running && (t.timer || t.pomo))) render();
-    } else if (S.tab === 'crew') { S.crew = await api('crew'); render(); }
+      if (!(running && (t.timer || t.pomo)) && JSON.stringify(t, (k, v) => k === 'events' ? undefined : v) !== before) render();
+    } else if (S.tab === 'crew') {
+      const next = await api('crew'), before = JSON.stringify(S.crew);
+      S.crew = next;
+      if (JSON.stringify(next) !== before) render();
+    }
   } catch (e) { }
 }, 25000);
 

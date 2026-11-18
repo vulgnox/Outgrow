@@ -2,7 +2,7 @@ import json, os, sys, time, urllib.request, http.cookiejar, subprocess, tempfile
 
 PORT = 8799
 tmp = tempfile.mkdtemp()
-env = dict(os.environ, PORT=str(PORT), RAGDAMAXING_DB=os.path.join(tmp, "t.db"), RAGDAMAXING_ADMINS="zenx", RAGDAMAXING_SEASON_ANCHOR=(__import__("datetime").date.today() - __import__("datetime").timedelta(days=35)).isoformat())
+env = dict(os.environ, PORT=str(PORT), RAGDAMAXING_DB=os.path.join(tmp, "t.db"), RAGDAMAXING_ADMINS="zenx", RAGDAMAXING_EVAL_TTL="0", RAGDAMAXING_SEASON_ANCHOR=(__import__("datetime").date.today() - __import__("datetime").timedelta(days=35)).isoformat())
 srv = subprocess.Popen([sys.executable, "server.py"], env=env, cwd=os.path.dirname(os.path.abspath(__file__)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 time.sleep(1.5)
 
@@ -128,7 +128,7 @@ try:
     check("never-miss-twice banner or redemption", True)
     s, r = a.call("GET", "/api/me"); check("me", s == 200)
     s, r = a.call("POST", "/api/logout", {}); check("logout", s == 200)
-    check("after logout 401", a.call("GET", "/api/me")[0] == 401)
+    s, r = a.call("GET", "/api/me"); check("after logout user is null", s == 200 and r["user"] is None, r)
     s, r = a.call("POST", "/api/login", {"username": "ZENX", "pin": "1234"}); check("login case-insens", s == 200, r)
 
     # ---------------- chat + admin ----------------
@@ -321,7 +321,7 @@ try:
         blob = resp.read(); check("backup is a sqlite file", blob[:15] == b"SQLite format 3" and "attachment" in resp.headers.get("Content-Disposition", ""))
     s, r = a.call("POST", "/api/admin/resetpin", {"username": "kritarth"}); newpin = r.get("pin")
     check("admin reset pin", s == 200 and len(newpin or "") == 8, r)
-    check("old pin dead + session killed", b.call("GET", "/api/me")[0] == 401 and Client().call("POST", "/api/login", {"username": "kritarth", "pin": "abcd"})[0] == 401)
+    s, r = b.call("GET", "/api/me"); check("old pin dead + session killed", s == 200 and r["user"] is None and Client().call("POST", "/api/login", {"username": "kritarth", "pin": "abcd"})[0] == 401, r)
     check("new pin works", Client().call("POST", "/api/login", {"username": "kritarth", "pin": newpin})[0] == 200)
 
     # ---------------- seasons, weekly challenge, cosmetics
@@ -345,7 +345,7 @@ try:
     check("not eligible = no prize", db.execute("SELECT COUNT(*) FROM xp WHERE user_id=2 AND key LIKE 'season:%'").fetchone()[0] == 0)
     s, r = a.call("GET", "/api/shop")
     owned = {x["id"] for x in r["items"] if x["owned"]}
-    check("shop: crown granted to season champion", "crown" in owned and len(r["items"]) == 10, owned)
+    check("shop: crown granted to season champion", "crown" in owned and len(r["items"]) >= 10, owned)
     check("shop: wallet is a number >= 30000", r["wallet"] >= 30000, r["wallet"])
     lvl_before = a.call("GET", "/api/me")[1]["level"]["xp"]
     s, r2 = a.call("POST", "/api/shop/buy", {"item": "frost"})

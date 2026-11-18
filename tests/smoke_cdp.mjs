@@ -148,6 +148,56 @@ try {
     await wait(250);
   }
 
+  // P-09: render() must patch the existing DOM, not replace it.
+  const morph = await cdp.send("Runtime.evaluate", {
+    expression: `(async () => {
+      await go('today');
+      const app = document.getElementById('app');
+      const first = app.firstElementChild, sec = app.querySelector('section');
+      render();
+      return { app: document.getElementById('app') === app, first: app.firstElementChild === first, sec: app.querySelector('section') === sec };
+    })()`,
+    awaitPromise: true, returnByValue: true,
+  });
+  const m = morph.result.value;
+  if (!m || !m.app || !m.first || !m.sec) problems.push("P-09: render() replaced DOM nodes " + JSON.stringify(m));
+
+  // P-09: a focused input keeps focus (and its uncommitted value) across a render.
+  const focus = await cdp.send("Runtime.evaluate", {
+    expression: `(async () => {
+      await go('reflect');
+      const inp = document.getElementById('d_title');
+      if (!inp) return { skip: 'no diary input' };
+      inp.value = 'keep me'; inp.focus();
+      render();
+      return { same: document.activeElement === inp, value: document.getElementById('d_title').value };
+    })()`,
+    awaitPromise: true, returnByValue: true,
+  });
+  const f = focus.result.value;
+  if (f && f.skip) console.log("SMOKE NOTE: focus check skipped (" + f.skip + ")");
+  else if (!f || !f.same || f.value !== 'keep me') problems.push("P-09: focus/value lost on render " + JSON.stringify(f));
+
+  // P-10: a new message appends; the existing message node is not rebuilt.
+  const chat = await cdp.send("Runtime.evaluate", {
+    expression: `(async () => {
+      await go('chat');
+      const t = (CH.threads || []).find(x => x.kind === 'crew') || (CH.threads || [])[0];
+      if (!t) return { skip: 'no thread' };
+      await chatOpen(t.key);
+      const ta = document.getElementById('chat_in');
+      ta.value = 'smoke one'; await chatSend();
+      const first = document.querySelector('.msg[data-mid]'), id = first && first.dataset.mid;
+      ta.value = 'smoke two'; await chatSend();
+      return { id, same: !!first && document.querySelector('.msg[data-mid="' + id + '"]') === first,
+               count: document.querySelectorAll('.msg[data-mid]').length };
+    })()`,
+    awaitPromise: true, returnByValue: true,
+  });
+  const c = chat.result.value;
+  if (c && c.skip) console.log("SMOKE NOTE: chat check skipped (" + c.skip + ")");
+  else if (!c || !c.same || c.count !== 2) problems.push("P-10: chat did not append in place " + JSON.stringify(c));
+
   if (problems.length) {
     console.error("SMOKE FAILED");
     for (const p of [...new Set(problems)]) console.error(" - " + p);

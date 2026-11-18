@@ -368,6 +368,40 @@ try:
     a.call("POST", "/api/habit", {"habit": "exercise", "done": True})   # any POST runs evaluate()
     owned = {x["id"] for x in a.call("GET", "/api/shop")[1]["items"] if x["owned"]}
     check("phoenix earned by 4h sitting", "phoenix" in owned, owned)
+    # ---------------- diary, notification bell, starter avatars
+    s, r = cc.call("POST", "/api/journal", {"title": "Day one", "body": "Felt slow but showed up.\nGood.", "mood": 4})
+    check("diary create", s == 200 and r["id"], r)
+    jid = r["id"]
+    check("diary empty rejected", cc.call("POST", "/api/journal", {"body": "   "})[0] == 400)
+    check("diary too long rejected", cc.call("POST", "/api/journal", {"body": "x" * 5001})[0] == 400)
+    cc.call("POST", "/api/journal", {"body": "second page, mood low", "mood": 1})
+    s, r = cc.call("GET", "/api/journal")
+    check("diary list newest first + stats", s == 200 and len(r["entries"]) == 2 and r["entries"][0]["mood"] == 1 and r["stats"]["total"] == 2 and r["stats"]["streak"] == 1, r)
+    check("diary search", [e["id"] for e in cc.call("GET", "/api/journal?q=showed%20up")[1]["entries"]] == [jid])
+    check("diary search escapes %", cc.call("GET", "/api/journal?q=%25")[1]["entries"] == [])
+    check("diary mood filter", len(cc.call("GET", "/api/journal?mood=4")[1]["entries"]) == 1)
+    check("diary private to owner (admin too)", a.call("GET", "/api/journal")[1]["entries"] == [] and dd.call("GET", "/api/journal")[1]["entries"] == [])
+    check("cannot edit another user's entry", a.call("POST", "/api/journal", {"id": jid, "body": "hax"})[0] == 404)
+    check("cannot delete another user's entry", (a.call("POST", "/api/journal/delete", {"id": jid}), len(cc.call("GET", "/api/journal")[1]["entries"]))[1] == 2)
+    check("diary edit own", cc.call("POST", "/api/journal", {"id": jid, "body": "edited text", "mood": 5})[0] == 200 and cc.call("GET", "/api/journal?mood=5")[1]["entries"][0]["edited_ts"])
+    check("diary delete own", cc.call("POST", "/api/journal/delete", {"id": jid})[0] == 200 and len(cc.call("GET", "/api/journal")[1]["entries"]) == 1)
+
+    s, r = cc.call("GET", "/api/notifs")
+    check("bell: C sees others' activity", s == 200 and r["count"] >= 1 and all(i["display"] != "third" for i in r["items"]) and not any(i["kind"] in ("session", "join") for i in r["items"]), r)
+    check("bell count-only mode", cc.call("GET", "/api/notifs?count=1")[1]["count"] == r["count"] and "items" not in cc.call("GET", "/api/notifs?count=1")[1])
+    check("bell mark seen clears", cc.call("POST", "/api/notifs/seen", {})[0] == 200 and cc.call("GET", "/api/notifs?count=1")[1]["count"] == 0)
+    s, r = Client().call("GET", "/api/notifs"); check("bell needs login", s == 401)
+    ee = Client(); ee.call("POST", "/api/register", {"username": "fresh1", "pin": "1234", "crew_code": code})
+    check("new member starts with clean bell", ee.call("GET", "/api/notifs?count=1")[1]["count"] == 0)
+    cc.call("POST", "/api/nudge", {"to": ee.call("GET", "/api/me")[1]["user"]["id"]})
+    check("nudge shows in bell", ee.call("GET", "/api/notifs?count=1")[1]["count"] == 1)
+    ee.call("POST", "/api/notifs/seen", {})
+    check("nudge cleared once seen", ee.call("GET", "/api/notifs?count=1")[1]["count"] == 0)
+
+    sh = ee.call("GET", "/api/shop")[1]
+    check("shop lists 15 starter avatars", len(sh["defaults"]) == 15 and ee.call("GET", "/api/me")[1]["user"]["emoji"] in sh["defaults"], sh["defaults"])
+    s, r = ee.call("POST", "/api/settings", {"emoji": "🐼"}); check("pick starter avatar", s == 200 and r["user"]["emoji"] == "🐼", r)
+    s, r = ee.call("POST", "/api/settings", {"emoji": "💩"}); check("non-starter emoji ignored", s == 200 and r["user"]["emoji"] == "🐼", r)
 finally:
     srv.send_signal(signal.SIGTERM)
     out = srv.stdout.read()

@@ -52,6 +52,7 @@ ROLLOVER_HOUR = 3  # a "day" ends at 3 AM, so late-night study still counts for 
 SUBJECTS = ["Physics", "Chemistry", "Maths", "English", "Other"]
 CORE = ["Physics", "Chemistry", "Maths"]
 EMOJIS = ["🔥", "💪", "👏", "😤", "🫡"]
+DEFAULT_AVATARS = ["🦊", "🐺", "🦅", "🐉", "🦁", "🐯", "🦈", "🔥", "🐼", "🦉", "🐙", "🦄", "🐻", "🦋", "🐸"]  # free for everyone
 
 HABITS = [
     ("exercise", "Exercise", "💪", 40),
@@ -142,6 +143,9 @@ CREATE TABLE IF NOT EXISTS habits(user_id INTEGER, day TEXT, habit TEXT, PRIMARY
 CREATE TABLE IF NOT EXISTS plans(id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, text TEXT, cue TEXT DEFAULT '', done INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS reflections(id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, mood INTEGER, energy INTEGER,
  win TEXT, leak TEXT, kind_note TEXT, tomorrow TEXT, UNIQUE(user_id, day));
+CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, day TEXT, ts TEXT, title TEXT DEFAULT '',
+ body TEXT, mood INTEGER DEFAULT 3, edited_ts TEXT);
+CREATE INDEX IF NOT EXISTS idx_journal_user ON journal(user_id, id);
 CREATE TABLE IF NOT EXISTS weekly(id INTEGER PRIMARY KEY, user_id INTEGER, week TEXT, best TEXT, leak TEXT, change TEXT,
  premortem TEXT, ifthen TEXT, UNIQUE(user_id, week));
 CREATE TABLE IF NOT EXISTS chapters(id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, grade TEXT, name TEXT,
@@ -907,9 +911,10 @@ def api_register(c):
     exams = json.dumps([{"name": "Exams (set your real dates in Me)", "date": "2027-02-15"}])
     cur = c.conn.execute("""INSERT INTO users(username,display,pw_hash,salt,crew_id,color,emoji,exams,created_at,last_settled)
         VALUES(?,?,?,?,?,?,?,?,?,?)""", (name, name, hash_pw(pin, salt), salt, crew_id, colors[n % len(colors)],
-                                          random.choice(["🦊", "🐺", "🦅", "🐉", "🦁", "🐯", "🦈", "🔥"]), exams,
+                                          random.choice(DEFAULT_AVATARS), exams,
                                           now().isoformat(timespec="seconds"), iso(today() - D(1))))
     uid = cur.lastrowid
+    c.conn.execute("UPDATE users SET feed_seen=(SELECT COALESCE(MAX(id),0) FROM feed WHERE crew_id=?) WHERE id=?", (crew_id, uid))
     c.user = q1(c.conn, "SELECT * FROM users WHERE id=?", (uid,))
     new_session(c, uid)
     # Season 0: carry over the original growth tracker history
@@ -977,8 +982,12 @@ def api_settings(c):
         fields["daily_min"] = max(15, min(240, need(c, "daily_min", int)))
     if "color" in b and re.fullmatch(r"#[0-9a-fA-F]{6}", str(b["color"])):
         fields["color"] = b["color"]
-    if "emoji" in b:
-        fields["emoji"] = str(b["emoji"])[:4] or u["emoji"]
+    if "emoji" in b:  # starter avatars only (or keep the one you already have). Picking one clears a sigil avatar.
+        new = str(b["emoji"])[:4]
+        if new in DEFAULT_AVATARS or new == u["emoji"]:
+            fields["emoji"] = new
+            if new != u["emoji"]:
+                fields["av"] = ""
     if "exams" in b and isinstance(b["exams"], list):
         ex = []
         for e in b["exams"][:8]:
@@ -2786,6 +2795,34 @@ COSMETICS = [  # id, kind, name, rarity, price (None = earned), how to earn, pro
      "prog": ("wchal", 4, "challenges", 1), "test": lambda s: s["wchal"] >= 4},
     {"id": "phoenix", "kind": "avatar", "name": "Phoenix", "rarity": "L", "price": None, "how": "Sit for 4 hours straight (one stopwatch block)",
      "prog": ("best_session", 240, "min", 1), "test": lambda s: s["best_session"] >= 240},
+    # ---- Lordran pack: Dark Souls-style avatars + animated auras
+    {"id": "knight", "kind": "avatar", "name": "Chosen Undead", "rarity": "C", "price": 4000},
+    {"id": "hollow", "kind": "avatar", "name": "Hollow", "rarity": "C", "price": 4500},
+    {"id": "raven", "kind": "avatar", "name": "Dusk Raven", "rarity": "R", "price": 9500},
+    {"id": "oni", "kind": "avatar", "name": "Oni Mask", "rarity": "R", "price": 12000},
+    {"id": "estus", "kind": "avatar", "name": "Estus Flask", "rarity": "R", "price": None, "how": "Finish 25 deep blocks (50+ min)",
+     "prog": ("deep", 25, "blocks", 1), "test": lambda s: s["deep"] >= 25},
+    {"id": "dragon", "kind": "avatar", "name": "Ancient Dragon", "rarity": "E", "price": 32000},
+    {"id": "sunbro", "kind": "avatar", "name": "Praise the Sun", "rarity": "E", "price": None, "how": "Start 10 timer blocks before 7 AM",
+     "prog": ("early", 10, "blocks", 1), "test": lambda s: s["early"] >= 10},
+    {"id": "moth", "kind": "avatar", "name": "Moonlight Butterfly", "rarity": "E", "price": None, "how": "Win 3 duels",
+     "prog": ("duel_wins", 3, "duels", 1), "test": lambda s: s["duel_wins"] >= 3},
+    {"id": "bonfire", "kind": "avatar", "name": "Bonfire", "rarity": "E", "price": None, "how": "Come back after a missed day, 3 times",
+     "prog": ("redeems", 3, "comebacks", 1), "test": lambda s: s["redeems"] >= 3},
+    {"id": "darksign", "kind": "avatar", "name": "Darksign", "rarity": "L", "price": None, "how": "Hold a 30-day streak",
+     "prog": ("longest", 30, "days", 1), "test": lambda s: s["longest"] >= 30},
+    {"id": "fog", "kind": "frame", "name": "Fog Gate", "rarity": "C", "price": 3000},
+    {"id": "flask", "kind": "frame", "name": "Estus Glow", "rarity": "R", "price": 9000},
+    {"id": "lightning", "kind": "frame", "name": "Lightning Spear", "rarity": "R", "price": 11000},
+    {"id": "humanity", "kind": "frame", "name": "Humanity Sprite", "rarity": "E", "price": 26000},
+    {"id": "moonlight", "kind": "frame", "name": "Moonlight Aura", "rarity": "E", "price": 30000},
+    {"id": "sunlight", "kind": "frame", "name": "Sunlight Aura", "rarity": "E", "price": 34000},
+    {"id": "kindle", "kind": "frame", "name": "Bonfire Kindled", "rarity": "E", "price": None, "how": "Log 50 hours of focus",
+     "prog": ("minutes", 3000, "h", 60), "test": lambda s: s["minutes"] >= 3000},
+    {"id": "abyss", "kind": "frame", "name": "Abyss Watcher", "rarity": "L", "price": None, "how": "Defeat 5 daily bosses with your crew",
+     "prog": ("boss_wins", 5, "bosses", 1), "test": lambda s: s["boss_wins"] >= 5},
+    {"id": "cinder", "kind": "frame", "name": "Soul of Cinder", "rarity": "M", "price": None, "how": "Hold a 60-day streak",
+     "prog": ("longest", 60, "days", 1), "test": lambda s: s["longest"] >= 60},
 ]
 COSMETIC_BY_ID = {x["id"]: x for x in COSMETICS}
 
@@ -2835,7 +2872,7 @@ def shop_view(conn, u):
             row["prog"] = {"have": round(min(s[k], need) / div, 1), "need": round(need / div, 1), "unit": unit}
         items.append(row)
     bal, spent = wallet(conn, uid)
-    return {"items": items, "wallet": bal, "spent": spent, "equipped": {"avatar": u.get("av") or "", "frame": u.get("fr") or ""}, "chal": chal_view(conn, u)}
+    return {"items": items, "defaults": DEFAULT_AVATARS, "wallet": bal, "spent": spent, "equipped": {"avatar": u.get("av") or "", "frame": u.get("fr") or ""}, "chal": chal_view(conn, u)}
 
 
 @route("GET", "/api/shop")
@@ -2874,6 +2911,108 @@ def api_shop_equip(c):
     c.conn.execute(f"UPDATE users SET {col}=? WHERE id=?", (item, c.user["id"]))
     c.user = q1(c.conn, "SELECT * FROM users WHERE id=?", (c.user["id"],))
     return {"ok": True, "user": public_user(c.user)}
+
+
+# ----------------------------------------------------------------------------- diary (private: every query is scoped to the owner)
+JOURNAL_MAX = 5000
+
+
+def journal_clean(raw, limit):
+    t = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", str(raw or "").replace("\r\n", "\n")).strip()
+    return re.sub(r"\n{4,}", "\n\n\n", t)[:limit]
+
+
+@route("GET", "/api/journal")
+def journal_get(c):
+    uid, conn = c.user["id"], c.conn
+    before, search, mood = qpi(c, "before"), qp(c, "q").strip()[:80], qpi(c, "mood")
+    limit = max(1, min(40, qpi(c, "limit", 20)))
+    where, args = ["user_id=?"], [uid]
+    if before:
+        where.append("id<?")
+        args.append(before)
+    if search:
+        like = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where.append("(body LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')")
+        args += [like, like]
+    if mood:
+        where.append("mood=?")
+        args.append(mood)
+    rows = q(conn, f"SELECT id, day, ts, title, body, mood, edited_ts FROM journal WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT ?", (*args, limit + 1))
+    out = {"entries": rows[:limit], "more": len(rows) > limit}
+    if not before:
+        t = today()
+        days = {r["day"] for r in q(conn, "SELECT DISTINCT day FROM journal WHERE user_id=?", (uid,))}
+        d, streak = (t if iso(t) in days else t - D(1)), 0
+        while iso(d) in days:
+            streak += 1
+            d -= D(1)
+        row = q1(conn, "SELECT COUNT(*) n, COALESCE(SUM(length(body)),0) ch FROM journal WHERE user_id=?", (uid,))
+        out["stats"] = {"total": row["n"], "days": len(days), "streak": streak, "words": row["ch"] // 6}
+        out["otd"] = []
+        if not search and not mood:
+            for label, n in (("1 week ago", 7), ("1 month ago", 30), ("1 year ago", 365)):
+                e = q1(conn, "SELECT id, day, title, body, mood FROM journal WHERE user_id=? AND day=? ORDER BY id LIMIT 1", (uid, iso(t - D(n))))
+                if e:
+                    out["otd"].append({**e, "label": label})
+    return out
+
+
+@route("POST", "/api/journal")
+def journal_post(c):
+    uid = c.user["id"]
+    body, title = journal_clean(c.body.get("body"), JOURNAL_MAX + 1), journal_clean(c.body.get("title"), 80).replace("\n", " ")
+    if not body:
+        raise ApiError("Write something first")
+    if len(body) > JOURNAL_MAX:
+        raise ApiError(f"Max {JOURNAL_MAX} characters")
+    try:
+        mood = max(1, min(5, int(c.body.get("mood") or 3)))
+    except (TypeError, ValueError):
+        mood = 3
+    n = now().isoformat(timespec="seconds")
+    jid = c.body.get("id")
+    if jid:
+        row = q1(c.conn, "SELECT id FROM journal WHERE id=? AND user_id=?", (int(jid), uid))
+        if not row:
+            raise ApiError("not found", 404)
+        c.conn.execute("UPDATE journal SET title=?, body=?, mood=?, edited_ts=? WHERE id=?", (title, body, mood, n, row["id"]))
+        return {"ok": True, "id": row["id"]}
+    cur = c.conn.execute("INSERT INTO journal(user_id,day,ts,title,body,mood) VALUES(?,?,?,?,?,?)", (uid, iso(today()), n, title, body, mood))
+    return {"ok": True, "id": cur.lastrowid}
+
+
+@route("POST", "/api/journal/delete")
+def journal_delete(c):
+    c.conn.execute("DELETE FROM journal WHERE id=? AND user_id=?", (need(c, "id", int), c.user["id"]))
+    return {"ok": True}
+
+
+# ----------------------------------------------------------------------------- notification bell
+@route("GET", "/api/notifs")
+def notifs_get(c):
+    u, conn = c.user, c.conn
+    if not u["crew_id"]:
+        return {"count": 0, "items": [], "nudges": [], "chat": 0}
+    seen = q1(conn, "SELECT feed_seen FROM users WHERE id=?", (u["id"],))["feed_seen"] or 0
+    base = "FROM feed f JOIN users us ON us.id=f.user_id WHERE f.crew_id=? AND f.user_id<>? AND f.kind NOT IN ('session','join')"
+    nudges = q(conn, "SELECT n.id, us.display, us.emoji, us.color, us.av, us.fr FROM nudges n JOIN users us ON us.id=n.from_id WHERE n.to_id=? AND n.day=? AND n.seen=0",
+               (u["id"], iso(today())))
+    new = conn.execute(f"SELECT COUNT(*) {base} AND f.id>?", (u["crew_id"], u["id"], seen)).fetchone()[0]
+    count = min(new, 99) + len(nudges)
+    if qp(c, "count") == "1":
+        return {"count": count}
+    items = q(conn, f"SELECT f.id, f.ts, f.kind, f.text, us.display, us.emoji, us.color, us.av, us.fr {base} ORDER BY f.id DESC LIMIT 30", (u["crew_id"], u["id"]))
+    for i in items:
+        i["new"] = i["id"] > seen
+    return {"count": count, "items": items, "nudges": nudges, "chat": sum(chat_unread(conn, u).values())}
+
+
+@route("POST", "/api/notifs/seen")
+def notifs_seen(c):
+    c.conn.execute("UPDATE users SET feed_seen=(SELECT COALESCE(MAX(id),0) FROM feed WHERE crew_id=?) WHERE id=?", (c.user["crew_id"], c.user["id"]))
+    c.conn.execute("UPDATE nudges SET seen=1 WHERE to_id=?", (c.user["id"],))
+    return {"ok": True}
 
 
 # ----------------------------------------------------------------------------- http
@@ -3028,10 +3167,16 @@ def migrate(conn):
                             ("users", "prev_crew", "INTEGER"),
                             ("users", "av", "TEXT DEFAULT ''"),
                             ("users", "fr", "TEXT DEFAULT ''"),
+                            ("users", "feed_seen", "INTEGER DEFAULT 0"),
+                            ("nudges", "seen", "INTEGER DEFAULT 0"),
                             ("timers", "last_ping", "REAL"),
                             ("timers", "away", "REAL DEFAULT 0")):
         if col not in cols(table):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+            if col == "feed_seen":
+                conn.execute("UPDATE users SET feed_seen=(SELECT COALESCE(MAX(id),0) FROM feed)")  # existing users start with a clean bell
+            if col == "seen":
+                conn.execute("UPDATE nudges SET seen=1")
             if col == "last_ping":
                 conn.execute("UPDATE timers SET last_ping=?", (time.time(),))  # blocks already running at deploy time are not penalised
     if conn.execute("PRAGMA user_version").fetchone()[0] < 1:

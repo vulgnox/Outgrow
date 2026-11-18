@@ -237,10 +237,20 @@ const SIGIL = {
   wolf: '<svg viewBox="0 0 40 40"><path d="M5 5l9 9h12l9-9-1 17-14 14L6 22z" fill="#c9ccd6"/><path d="M11 20l6 2-6 2zM29 20l-6 2 6 2z" fill="#f5b83d"/><path d="M17 29h6l-3 4z" fill="#16161e"/><path d="M5 5l5 9M35 5l-5 9" stroke="#8a8fa0" stroke-width="1.5"/></svg>',
   skull: '<svg viewBox="0 0 40 40"><path d="M20 4C11 4 7 10 7 17c0 5 2 8 5 10v6h16v-6c3-2 5-5 5-10 0-7-4-13-13-13z" fill="#d8dbe6"/><rect x="11" y="15" width="7" height="6" rx="1" fill="#22d3ee"/><rect x="22" y="15" width="7" height="6" rx="1" fill="#22d3ee"/><path d="M20 22l-2.5 4h5z" fill="#16161e"/><path d="M15 33v-4M20 33v-4M25 33v-4" stroke="#16161e" stroke-width="1.5"/><path d="M29 10l-3 3h4l-2 4" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>',
   eye: '<svg viewBox="0 0 40 40"><path d="M2 21Q20 3 38 21Q20 39 2 21z" fill="#14101f" stroke="#a86bff" stroke-width="2"/><circle cx="20" cy="21" r="8" fill="#a86bff"/><circle cx="20" cy="21" r="3.6" fill="#0b0b12"/><path d="M20 3v5M9 8l3 4M31 8l-3 4" stroke="#c9a8ff" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  knight: '<svg viewBox="0 0 40 40"><path d="M20 4l-2-3h4z" fill="#e5484d"/><path d="M8 35V17Q8 5 20 4Q32 5 32 17V35Z" fill="#9aa0b4"/><path d="M8 35V17Q8 5 20 4V35Z" fill="#c4c9d8"/><path d="M19 4h2v15h-2z" fill="#6b7080"/><path d="M10 18h20v4H10z" fill="#12121a"/><circle cx="15" cy="20" r="1.2" fill="#f5b83d" class="eyeg"/><circle cx="25" cy="20" r="1.2" fill="#f5b83d" class="eyeg"/><path d="M12 27h16M12 31h16" stroke="#12121a" stroke-width="1.2"/></svg>',
+  hollow: '<svg viewBox="0 0 40 40"><path d="M20 3C11 3 5 11 5 21v15h30V21C35 11 29 3 20 3z" fill="#2f2e3d"/><path d="M20 8c-6 0-10 5-10 12 0 4 2 7 4 9h12c2-2 4-5 4-9 0-7-4-12-10-12z" fill="#0b0a10"/><circle cx="16" cy="20" r="2.2" fill="#ff5468" class="eyeg"/><circle cx="24" cy="20" r="2.2" fill="#ff5468" class="eyeg"/><path d="M15 28h10" stroke="#4a4860" stroke-width="1.4"/><path d="M5 36h30" stroke="#1c1b26" stroke-width="2"/></svg>',
+  raven: '<svg viewBox="0 0 40 40"><path d="M5 31C5 15 15 6 28 8l9 3-8 3c1 9-4 17-14 18z" fill="#1d1c28"/><path d="M28 8l9 3-8 3z" fill="#f5b83d"/><circle cx="25" cy="12.5" r="1.7" fill="#e8eaf2"/><path d="M9 29c7 0 13-4 15-12" stroke="#403f55" stroke-width="1.6" fill="none" stroke-linecap="round"/><path d="M12 33l-3 5M17 33l-1 5" stroke="#403f55" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  oni: '<svg viewBox="0 0 40 40"><path d="M8 5l5 10M32 5l-5 10" stroke="#f5e9d0" stroke-width="3.4" stroke-linecap="round"/><path d="M7 16Q7 10 20 10Q33 10 33 16V24Q33 35 20 38Q7 35 7 24Z" fill="#c8343c"/><path d="M11 18l7 3-7 2zM29 18l-7 3 7 2z" fill="#fff3b0" class="eyeg"/><path d="M12 29q8 4 16 0" stroke="#2a0a0c" stroke-width="2" fill="none"/><path d="M15 29v3.5M20 30.5V34M25 29v3.5" stroke="#fff3d0" stroke-width="2"/></svg>',
+  estus: '<svg viewBox="0 0 40 40"><path d="M16 4h8v3h-1v6l8 14q2 5-3 8H12q-5-3-3-8l8-14V7h-1z" fill="#2a2110" stroke="#f5b83d" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 26l4-7h8l4 7q1 4-2 6H14q-3-2-2-6z" fill="#ffb020" class="liq"/><path d="M15 4h10" stroke="#c98a2a" stroke-width="2.6"/><circle cx="18" cy="27" r="1.4" fill="#fff0b0"/><circle cx="23" cy="24" r="1" fill="#fff0b0"/></svg>',
+  dragon: '<svg viewBox="0 0 40 40"><path d="M8 4l6 9M32 4l-6 9" stroke="#d8dbe6" stroke-width="3.2" stroke-linecap="round"/><path d="M5 19Q5 10 20 10Q35 10 35 19Q35 31 20 38Q5 31 5 19z" fill="#3b8f6a"/><path d="M20 10v9" stroke="#2a6b4e" stroke-width="2"/><path d="M10 19l7 2-7 2zM30 19l-7 2 7 2z" fill="#ffd25a" class="eyeg"/><circle cx="16" cy="30" r="1.4" fill="#143d2c"/><circle cx="24" cy="30" r="1.4" fill="#143d2c"/><path d="M12 33l3-3M28 33l-3-3" stroke="#d8dbe6" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  sunbro: '<svg viewBox="0 0 40 40"><g class="rays" stroke="#ffd25a" stroke-width="2.4" stroke-linecap="round"><path d="M20 2v6M20 32v6M2 20h6M32 20h6M7.3 7.3l4.2 4.2M28.5 28.5l4.2 4.2M32.7 7.3l-4.2 4.2M11.5 28.5l-4.2 4.2"/></g><circle cx="20" cy="20" r="9.5" fill="#f5b83d"/><circle cx="20" cy="20" r="6.5" fill="#ffe08a"/><path d="M16 19h2.4M21.6 19H24" stroke="#7a4a10" stroke-width="1.6" stroke-linecap="round"/><path d="M17 23q3 2 6 0" stroke="#7a4a10" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>',
+  moth: '<svg viewBox="0 0 40 40"><g class="wing"><path d="M20 19C12 6 3 8 5 19c1 6 9 8 15 1z" fill="#7aa8ff"/><path d="M20 19C28 6 37 8 35 19c-1 6-9 8-15 1z" fill="#7aa8ff"/><path d="M19 22C13 27 8 31 11 35c4 2 8-5 9-13zM21 22c6 5 11 9 8 13-4 2-8-5-9-13z" fill="#4d78d6"/><circle cx="11" cy="15" r="2" fill="#e8f0ff"/><circle cx="29" cy="15" r="2" fill="#e8f0ff"/></g><path d="M20 12v21" stroke="#eaf1ff" stroke-width="2.2" stroke-linecap="round"/><path d="M20 12l-3-5M20 12l3-5" stroke="#eaf1ff" stroke-width="1.2" stroke-linecap="round"/></svg>',
+  bonfire: '<svg viewBox="0 0 40 40"><path d="M20 4c4 6 9 8 9 15 0 5-4 9-9 10-5-1-9-5-9-10 0-7 5-9 9-15z" fill="#ff8a3c" class="fl"/><path d="M20 13c3 4 5 5 5 9 0 3-2.5 5-5 5s-5-2-5-5c0-4 2-5 5-9z" fill="#ffd25a" class="fl2"/><path d="M20 8v27" stroke="#d8dbe6" stroke-width="2.4"/><path d="M13 31h14" stroke="#d8dbe6" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="20" cy="22" rx="6.5" ry="2" fill="none" stroke="#9aa0b4" stroke-width="1.3"/><path d="M20 38l-2-3h4z" fill="#d8dbe6"/></svg>',
+  darksign: '<svg viewBox="0 0 40 40"><g class="dsring"><path d="M20 3.5a16.5 16.5 0 1 0 15 9.5" fill="none" stroke="#ff8a3c" stroke-width="3" stroke-linecap="round"/></g><circle cx="20" cy="20" r="9" fill="#120a08" stroke="#ff8a3c" stroke-width="1.6"/><circle cx="20" cy="20" r="4.5" fill="#ff5a1f" class="liq"/><circle cx="20" cy="20" r="2" fill="#ffd25a"/></svg>',
   phoenix: '<svg viewBox="0 0 40 40"><path d="M20 3c4 8 10 10 10 19 0 7-5 12-10 14-5-2-10-7-10-14 0-9 6-11 10-19z" fill="#ff8a3c"/><path d="M20 14c2 5 5 7 5 11 0 4-3 6-5 7-2-1-5-3-5-7 0-4 3-6 5-11z" fill="#ffd25a"/><path d="M10 17L2 10l5 14zM30 17l8-7-5 14z" fill="#ff5c3c"/></svg>',
 };
-const SK_COL = { ronin: '#c9ccd6', wolf: '#9db4ff', skull: '#22d3ee', eye: '#a86bff', phoenix: '#ff8a3c' };
-const RC = { C: '#9aa0b4', R: '#4da3ff', E: '#a86bff', L: '#f5b83d' };
+const SK_COL = { ronin: '#c9ccd6', wolf: '#9db4ff', skull: '#22d3ee', eye: '#a86bff', phoenix: '#ff8a3c', knight: '#c4c9d8', hollow: '#ff5468', raven: '#7c7ca0', oni: '#c8343c', estus: '#ffb020', dragon: '#3b8f6a', sunbro: '#f5b83d', moth: '#7aa8ff', bonfire: '#ff8a3c', darksign: '#ff8a3c' };
+const RC = { C: '#9aa0b4', R: '#4da3ff', E: '#a86bff', L: '#f5b83d', M: '#ff5468' };
 const avatar = (emo, col, cls = '', rank = null, cos = null) => {
   const i = rank == null ? -1 : tierIdx(rank), fr = cos && cos.fr ? String(cos.fr) : '', sk = cos && cos.av && SIGIL[cos.av] ? cos.av : '';
   const c = sk ? SK_COL[sk] : col, fx = fr ? ` fx-${esc(fr)}` : i >= 3 ? ' fr' : '';
@@ -264,21 +274,26 @@ function renderAuth() {
     <button class="btn-p btn-xl" data-act="${reg ? 'register' : 'login'}">${reg ? 'Join the grind' : 'Log in'}</button>
     <button class="btn-text" data-act="authMode">${reg ? 'I already have an account' : 'New here? Create an account'}</button>
   </div></div>`;
-  closeModal(); $('.nav')?.remove(); $('.fab')?.remove();
+  closeModal(); $('.nav')?.remove(); $('.fab')?.remove(); $('#bell')?.remove();
 }
+
+Object.assign(S, { crewSec: 'home', reflSub: 'diary', diary: null, dq: '', dmood: 0, dmoodPick: 3, dopen: {}, dedit: null });
+const NOTIF = { count: 0 };
+const topbar = () => `<div class="topbar"><h1>${esc((TABS.find(t => t[0] === S.tab) || [])[2] || '')}</h1></div>`;
+function enterAnim() { if (reduced()) return; const a = $('#app'); a.classList.remove('enter'); void a.offsetWidth; a.classList.add('enter'); setTimeout(() => a.classList.remove('enter'), 800); }
 
 /* ---------- navigation + rendering ---------- */
 const TABS = [['today', 'today', 'Today'], ['crew', 'crew', 'Crew'], ['chat', 'chat', 'Chat'], ['study', 'study', 'Study'], ['reflect', 'reflect', 'Reflect'], ['me', 'me', 'Me']];
 let _navSeq = 0;
 async function loadTab(tab) {
   if (tab === 'today') setToday(await api('today'));
-  else if (tab === 'crew') S.crew = await api('crew');
+  else if (tab === 'crew') { const [cr, sh] = await Promise.all([api('crew'), S.crewSec === 'shop' ? api('shop') : null]); S.crew = cr; if (sh) S.shop = sh; }
   else if (tab === 'study') {
     const [syl, te] = await Promise.all([api('syllabus'), api('tests')]); S.syl = syl; S.tests = te;
     if (!S.ins) S.ins = await api('insights');
   }
-  else if (tab === 'reflect') { const [r, w, rp] = await Promise.all([api('reflect'), api('weekly'), api('report')]); S.refl = r; S.weekly = w; S.report = rp; S.reportView = 'last'; }
-  else if (tab === 'me') { const [ins, gr, sh] = await Promise.all([api('insights'), api('growth'), api('shop')]); S.ins = ins; S.growth = gr; S.shop = sh; }
+  else if (tab === 'reflect') { const [r, w, rp] = await Promise.all([api('reflect'), api('weekly'), api('report')]); S.refl = r; S.weekly = w; S.report = rp; S.reportView = 'last'; if (S.reflSub === 'diary') await diaryLoad(); }
+  else if (tab === 'me') { const [ins, gr] = await Promise.all([api('insights'), api('growth')]); S.ins = ins; S.growth = gr; }
   else if (tab === 'chat') await chatLoadThreads();
 }
 async function go(tab) {
@@ -287,7 +302,7 @@ async function go(tab) {
   if (changed && S.user) { stopTick(); $('.fab')?.remove(); $('#app').innerHTML = skeleton(); ensureNav(); }
   try { await loadTab(tab); } catch (e) { if (e.message === 'login') return; }
   if (seq !== _navSeq) return;
-  render(); if (changed) window.scrollTo(0, 0);
+  render(); if (changed) { window.scrollTo(0, 0); enterAnim(); }
 }
 /* reload the current tab's data and redraw WITHOUT jumping the page back to the top */
 async function refresh() {
@@ -304,7 +319,7 @@ function ensureNav() {
     document.body.appendChild(nav);
   }
   $$('.nav button').forEach(b => b.classList.toggle('on', b.dataset.v === S.tab));
-  chatBadge();
+  chatBadge(); bellDraw();
 }
 function render() {
   if (!S.user) return renderAuth();
@@ -314,7 +329,7 @@ function render() {
   try { v = views[S.tab](); }
   catch (e) { console.error(e); v = '<section class="card c"><div class="b">This tab hit a snag.</div><p class="sm mut">Reload to try again.</p><button class="btn-s" data-act="reload">Reload</button></section>'; }
   const flip = S.tab === 'crew' && !reduced() ? new Map($$('.lb[data-uid]').map(e => [e.dataset.uid, e.getBoundingClientRect().top])) : null;
-  $('#app').innerHTML = v;
+  $('#app').innerHTML = topbar() + v;
   if (flip) $$('.lb[data-uid]').forEach(e => { const p = flip.get(e.dataset.uid); if (p == null) return; const d = p - e.getBoundingClientRect().top; if (Math.abs(d) > 2) e.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: 420, easing: 'cubic-bezier(.2,.8,.2,1)' }); });
   runCounts();
   $('.fab')?.remove();
@@ -678,6 +693,8 @@ function vSeason(x) {
   if (x.hall.length) h += `<div class="lbl2">Hall of fame</div>${x.hall.map(d => `<div class="hof"><b>Season ${d.season}</b><div class="xs">${d.podium.map((p, i) => `${medal[i]} ${esc(p.emoji)} ${esc(p.name)}`).join('  ·  ')}</div></div>`).join('')}`;
   return h + '</section>';
 }
+const CSECS = [['home', 'Overview'], ['rank', 'League'], ['season', 'Season'], ['goals', 'Goals'], ['fame', 'Fame'], ['shop', 'Shop'], ['feed', 'Feed']];
+const cpc = (a, b) => Math.round(clamp(a / Math.max(b, 1) * 100, 0, 100));
 function vCrew() {
   const C = S.crew;
   if (!C.crew) return `<section class="card"><h2>No crew yet</h2><p class="mut sm">Competition works. Join your friends.</p><input id="cj" placeholder="Invite code" autocapitalize="characters"><button class="btn-p btn-xl mt8" data-act="joinCrew">Join crew</button><div class="mut xs c" style="margin:12px 0">or</div><input id="cn" placeholder="New crew name"><button class="btn-xl mt8" data-act="createCrew">Create crew</button></section>`;
@@ -689,8 +706,23 @@ function vCrew() {
     <div class="c"><div class="xs mut">${per} rank</div><div class="bignum sm">#${meI + 1}<span class="mut of"> / ${sorted.length}</span></div></div></div>
     <div class="sm mt12">${gap}</div>
     ${C.crown ? `<div class="crownline">${ic('crown', 15)}<span><b>${esc(C.crown.name)}</b> ${esc(C.crown.emoji)} held the crown last week with ${C.crown.xp.toLocaleString()} XP</span></div>` : ''}</section>`;
-
-  h += vSeason(C.season);
+  const x = { sorted, meI, me, top };
+  h += `<div class="float">${seg(CSECS, S.crewSec, 'crewSec')}</div>`;
+  const sec = { home: crewHome, rank: crewRank, season: () => vSeason(C.season), goals: crewGoals, fame: crewFame, shop: crewShop, feed: crewFeed }[S.crewSec] || crewHome;
+  return h + sec(C, x);
+}
+function crewHome(C, x) {
+  const tp = cpc(C.team.minutes, C.team.goal), bp = C.boss ? cpc(C.boss.actual, C.boss.target) : 0, live = C.members.filter(m => m.live);
+  let h = `<div class="grid3 tiles"><button class="stat tile" data-act="crewSec" data-v="goals"><b class="num">${tp}%</b><span class="xs mut">weekly goal</span><div class="bar o thin mt8"><i style="width:${tp}%"></i></div></button>
+    <button class="stat tile" data-act="crewSec" data-v="goals"><b class="num">${C.boss && C.boss.passed === true ? 'Done' : bp + '%'}</b><span class="xs mut">boss battle</span><div class="bar thin mt8 ${C.boss && C.boss.passed === true ? 'g' : ''}"><i style="width:${bp}%"></i></div></button>
+    <button class="stat tile" data-act="crewSec" data-v="rank"><b class="num">${fm(x.me.today_min)}</b><span class="xs mut">you today</span><div class="bar g thin mt8"><i style="width:${cpc(x.me.today_min, S.user.daily_min)}%"></i></div></button></div>`;
+  if (live.length) h += `<section class="card">${lbl('Locked in right now')}${live.map(m => `<div class="q"><span class="dot live"></span><div class="grow"><b>${esc(m.display)}</b> <span class="xs mut">${esc(m.live.subject)} · ${fm(m.live.elapsed / 60)}</span></div></div>`).join('')}</section>`;
+  if (C.feed.length) h += `<section class="card">${lbl('Latest', `<button class="btn-s" data-act="crewSec" data-v="feed">All activity</button>`)}${C.feed.slice(0, 3).map(f => `<div class="feed"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div></div>`).join('')}</section>`;
+  return h;
+}
+function crewRank(C, x) {
+  const { sorted, top } = x;
+  let h = '';
   const dotOf = m => m.live ? '<span class="dot live"></span>' : m.qualified ? '<span class="dot g"></span>' : m.today_min > 0 ? '<span class="dot y"></span>' : '<span class="dot"></span>';
   const nudgeBtn = m => !m.me && !m.qualified ? `<button class="btn-s nudge" ${m.nudged ? 'disabled' : ''} data-act="nudge" data-id="${m.id}">${m.nudged ? 'Nudged' : 'Nudge'}</button>` : '';
   const podium = sorted.length >= 3, off = podium ? 3 : 0;
@@ -708,7 +740,10 @@ function vCrew() {
       <div class="lbx"><b class="num">${p.xp.toLocaleString()}</b><div class="xs mut">XP · ${fm(p.min)}</div>${nudgeBtn(m)}</div></div>`;
   }).join('')}
     <div class="xs mut mt8"><span class="dot live"></span> live · <span class="dot g"></span> floor hit · <span class="dot y"></span> some work · <span class="dot"></span> nothing yet. A nudge gives you +5 XP. The league resets every Monday.</div></section>`;
-
+  return h;
+}
+function crewGoals(C) {
+  let h = '';
   const tp = Math.round(Math.min(C.team.minutes / Math.max(C.team.goal, 1) * 100, 100));
   h += `<section class="card">${lbl('Crew weekly goal', `<b class="num">${fm(C.team.minutes)} / ${fm(C.team.goal)}</b>`)}<div class="bar o"><i style="width:${tp}%"></i></div><div class="xs mut mt8">Hit it together for +100 XP each. You must log 5h+ yourself to share the loot. Nobody free-rides.</div></section>`;
   if (C.boss) {
@@ -716,15 +751,34 @@ function vCrew() {
     h += `<section class="card">${lbl('Daily boss battle', `<span class="pill ${stt[1]}">${stt[0]}</span>`)}<div class="bignum sm c">${fm(b.actual)} <span class="mut of">/ ${fm(b.target)}</span></div><div class="bar mt8 ${b.passed === true ? 'g' : ''}"><i style="width:${pct}%"></i></div>
       <div class="xs mut mt8">${b.passed === true ? 'Everyone got +50 XP.' : b.passed === false ? 'The crew missed the target. Three fails in a week disables the weekly goal XP.' : 'Verified timer minutes only. The target resets at 3 AM.'}</div></section>`;
   }
-  if (C.records && C.records.length) h += `<section class="card">${lbl('Crew records')}${C.records.map(r => `<div class="q"><div class="grow sm">${esc(r.label)}</div><div class="rt2"><b class="num">${r.unit === 'min' ? fm(r.value) : r.value + ' ' + r.unit}</b><div class="xs mut">${esc(r.emoji)} ${esc(r.name)}${r.me ? ' (you, defend it)' : ''}</div></div></div>`).join('')}<div class="xs mut mt8">Break one in a verified session and the whole crew sees it.</div></section>`;
-  if (C.hall && C.hall.length) h += `<section class="card">${lbl('Weekly champions')}${C.hall.map(x => `<div class="q"><span class="xs mut w64">wk ${esc(x.week.slice(5))}</span><div class="grow">${esc(x.emoji)} <b>${esc(x.name)}</b></div><span class="pill">${x.xp.toLocaleString()} XP</span></div>`).join('')}</section>`;
   const others = C.members.filter(m => !m.me);
   h += `<section class="card">${lbl('Duels')}${C.duels.length ? C.duels.map(d => `<div class="q"><div class="grow"><b>${esc(d.an)}</b> vs <b>${esc(d.bn)}</b> <span class="xs mut">${d.days}d · most focus minutes wins</span>${d.status === 'active' ? `<div class="xs">${fm(d.a_min)} vs ${fm(d.b_min)} · ends ${esc(d.end)}</div>` : '<div class="xs mut">Waiting for accept…</div>'}</div>${d.status === 'pending' && d.b === C.me ? `<button class="btn-p btn-s" data-act="acceptDuel" data-id="${d.id}">Accept</button>` : ''}</div>`).join('') : '<div class="mut sm">No duels running. Pick a rival.</div>'}
     ${others.length ? `<div class="row g8 mt12"><select id="du_o">${others.map(m => `<option value="${m.id}">${esc(m.display)}</option>`).join('')}</select><select id="du_d" style="width:84px"><option value="3">3d</option><option value="7" selected>7d</option><option value="14">14d</option></select><button data-act="duel">Challenge</button></div>` : ''}</section>`;
+  return h;
+}
+function crewFame(C) {
+  let h = '';
+  if (C.records && C.records.length) h += `<section class="card">${lbl('Crew records')}${C.records.map(r => `<div class="q"><div class="grow sm">${esc(r.label)}</div><div class="rt2"><b class="num">${r.unit === 'min' ? fm(r.value) : r.value + ' ' + r.unit}</b><div class="xs mut">${esc(r.emoji)} ${esc(r.name)}${r.me ? ' (you, defend it)' : ''}</div></div></div>`).join('')}<div class="xs mut mt8">Break one in a verified session and the whole crew sees it.</div></section>`;
+  if (C.hall && C.hall.length) h += `<section class="card">${lbl('Weekly champions')}${C.hall.map(x => `<div class="q"><span class="xs mut w64">wk ${esc(x.week.slice(5))}</span><div class="grow">${esc(x.emoji)} <b>${esc(x.name)}</b></div><span class="pill">${x.xp.toLocaleString()} XP</span></div>`).join('')}</section>`;
+  return h || '<section class="card c mut">Nothing in the hall yet. Finish a week and claim the first crown.</section>';
+}
+function crewFeed(C) {
+  let h = '';
   h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed k-${esc(f.kind || '')}"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
     <div class="rxrow">${['🔥', '💪', '👏', '😤', '🫡'].map(e => `<button class="rx ${f.mine === e ? 'me' : ''}" data-act="react" data-id="${f.id}" data-e="${e}">${e}${f.reactions[e] ? ' ' + f.reactions[e] : ''}</button>`).join('')}</div></div>`).join('') : '<div class="mut sm">Quiet. Be the first to move.</div>'}</section>`;
   return h;
 }
+function starterAvatars() {
+  const K = S.shop, u = S.user; if (!K) return '';
+  const eq = K.equipped;
+  return `<section class="card">${lbl('Starter avatars', 'free')}<div class="sm mut">Everyone starts here. Pick any one, then earn or buy sigils and frames below to stand out.</div>
+    <div class="starter">${K.defaults.map(e => `<button class="st ${!eq.avatar && u.emoji === e ? 'on' : ''}" data-act="setStarter" data-v="${e}" aria-label="Use ${e}">${avatar(e, u.color, 'lg', null, { fr: eq.frame })}</button>`).join('')}</div></section>`;
+}
+function crewShop() {
+  if (!S.shop) return '<section class="card c mut">Loading the shop…</section>';
+  return starterAvatars() + vLocker();
+}
+
 /* ---------- STUDY (syllabus / revise / tests) ---------- */
 function vStudy() {
   const tabs = [['chapters', 'Chapters'], ['revise', 'Revise'], ['tests', 'Tests']];
@@ -789,10 +843,10 @@ function vReport() {
     <div class="quote">${esc(P.insight)}</div>
     ${P.is_current ? '<div class="xs mut">Weeks can be shared to the crew feed once they are finished.</div>' : `<button class="btn-xl mt8" data-act="shareReport" data-v="${esc(P.week)}" ${P.shared ? 'disabled' : ''}>${P.shared ? 'Shared to the crew feed' : 'Share to the crew feed'}</button>`}</section>`;
 }
-function vReflect() {
+function vReflectParts() {
   const R = S.refl, W = S.weekly, t = R.today, miss = R.minutes < R.daily_min;
   const scale = (id, v, lo, hi) => `<div class="scale" id="${id}">${[1, 2, 3, 4, 5].map(i => `<span class="${(v || 3) === i ? 'on' : ''}" data-act="mood" data-g="${id}" data-v="${i}">${i}</span>`).join('')}</div><div class="row between xs mut mt4"><span>${lo}</span><span>${hi}</span></div>`;
-  let h = vReport() + `<section class="card hero"><h2>Tonight's reflection</h2><p class="sm mut">60 seconds. Not a diary, a debugging session. ${t ? '<b class="good">Done for today. You can still edit it.</b>' : '+40 XP'}</p>
+  let h = `<section class="card hero"><h2>Tonight's reflection</h2><p class="sm mut">60 seconds. Not a diary, a debugging session. ${t ? '<b class="good">Done for today. You can still edit it.</b>' : '+40 XP'}</p>
     <label>Mood</label>${scale('f_mood', t?.mood, 'Low', 'High')}<label>Energy</label>${scale('f_energy', t?.energy, 'Drained', 'Charged')}
     <label>One specific win today (small counts: "did 12 integration problems")</label><textarea id="f_win">${esc(t?.win || '')}</textarea>
     <label>Where did time leak, and what triggered it? (describe, don't judge)</label><textarea id="f_leak">${esc(t?.leak || '')}</textarea>
@@ -801,14 +855,14 @@ function vReflect() {
     <label>When and where exactly?</label><input id="f_cue" placeholder="After breakfast, desk, phone in the other room">
     <button class="btn-p btn-xl mt12" data-act="saveReflect">Save reflection</button></section>`;
   const s = W.summary, ex = W.existing, d = s.minutes - s.prev_minutes;
-  h += `<section class="card">${lbl('Weekly review', `Week of ${esc(s.week)}`)}<p class="sm mut">The data first, then the decision. +100 XP.</p><div class="grid3"><div class="stat"><b>${fm(s.minutes)}</b><span class="xs mut">focus</span></div><div class="stat"><b>${s.qualified_days}/7</b><span class="xs mut">floor days</span></div><div class="stat"><b>${d < 0 ? '-' : '+'}${fm(Math.abs(d))}</b><span class="xs mut">vs last week</span></div></div>
+  const hw = `<section class="card">${lbl('Weekly review', `Week of ${esc(s.week)}`)}<p class="sm mut">The data first, then the decision. +100 XP.</p><div class="grid3"><div class="stat"><b>${fm(s.minutes)}</b><span class="xs mut">focus</span></div><div class="stat"><b>${s.qualified_days}/7</b><span class="xs mut">floor days</span></div><div class="stat"><b>${d < 0 ? '-' : '+'}${fm(Math.abs(d))}</b><span class="xs mut">vs last week</span></div></div>
     ${Object.keys(s.by_subject).length ? `<div class="chips mt8">${Object.entries(s.by_subject).map(([k, v]) => `<span class="pill" style="background:${SCOL[k]}22;color:${SCOL[k]}">${esc(k)} ${fm(v)}</span>`).join('')}</div>` : ''}
     <label>Best moment of the week</label><input id="w_best" value="${esc(ex?.best || '')}"><label>Biggest leak</label><input id="w_leak" value="${esc(ex?.leak || '')}">
     <label>One thing I'll change next week (just one)</label><input id="w_chg" value="${esc(ex?.change || '')}">
     <label>Pre-mortem: it's next Sunday and the week went badly. Why?</label><input id="w_pre" value="${esc(ex?.premortem || '')}">
     <label>So: if that happens, then I will…</label><input id="w_if" value="${esc(ex?.ifthen || '')}"><button class="btn-xl mt12" data-act="saveWeekly">Save weekly review</button></section>`;
   if (R.history.length) h += `<section class="card">${lbl('Journal')}${R.history.map(r => `<div class="feed"><div class="row between"><b>${esc(r.day)}</b><span class="xs mut">mood ${r.mood}/5 · energy ${r.energy}/5</span></div><div class="sm">${esc(r.win)}</div>${r.leak ? `<div class="sm mut">Leak: ${esc(r.leak)}</div>` : ''}${r.kind_note ? `<div class="sm acc">${esc(r.kind_note)}</div>` : ''}</div>`).join('')}</section>`;
-  return h;
+  return { check: h, weekly: hw };
 }
 
 /* ---------- ME ---------- */
@@ -864,13 +918,13 @@ function vMe() {
   if (I.hours.some(x => x)) h += `<section class="card">${lbl('Your best focus hours')}<div class="hrs">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut mt4"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm mt8">Peak: <b>${best % 12 || 12}${best < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></section>`;
   if (Object.keys(I.sub7).length) { const tot = Object.values(I.sub7).reduce((a, b) => a + b, 0); h += `<section class="card">${lbl('Subject balance', '7 days')}${Object.entries(I.sub7).sort((a, b) => b[1] - a[1]).map(([s, m]) => `<div class="row g8" style="margin:8px 0"><span class="sm w78">${esc(s)}</span><div class="bar grow"><i style="width:${m / tot * 100}%;background:${SCOL[s] || '#9a9aa8'}"></i></div><span class="xs mut w56 r">${fm(m)}</span></div>`).join('')}</section>`; }
   if (I.urge_triggers.length) h += `<section class="card">${lbl('Your triggers')}<div class="chips">${I.urge_triggers.map(t => `<span class="pill">${esc(t.trigger)} ×${t.n}</span>`).join('')}</div></section>`;
-  h += vLocker();
+  h += `<section class="card">${lbl('Locker')}<div class="sm mut">Avatars and frames now live in the shop on the Crew tab.</div><button class="btn-xl mt12" data-act="openShop">Open the shop</button></section>`;
   h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge r-${b.rarity} ${b.got ? '' : 'off'}"><s><i>${esc(b.emoji)}</i></s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div><div class="rar">${esc(b.rname)} · +${b.xp} XP · held by ${b.holders}/${b.total}</div></div>`).join('')}</div></section>`;
   if (u.admin) h += `<section class="card">${lbl('Server')}<p class="sm mut">You run this crew. Live stats, PIN resets, moderation, backups.</p><button class="btn-xl" data-act="admin">Open server dashboard</button></section>`;
   h += `<section class="card">${lbl('Settings')}<label>Display name</label><input id="s_name" value="${esc(u.display)}" maxlength="20"><label>Identity: "I am becoming someone who…"</label><input id="s_id" value="${esc(u.identity)}" placeholder="shows up before he feels like it" maxlength="140">
     <div class="grid2"><div><label>Old A+ you studied (hrs/day)</label><input id="s_base" type="number" step="0.5" value="${u.baseline_h}"></div><div><label>Daily floor (min)</label><input id="s_floor" type="number" value="${u.daily_min}"></div></div>
     <label>Exams (name and date)</label>${[0, 1, 2].map(i => { const x = u.exams[i] || {}; return `<div class="row g8" style="margin-bottom:6px"><input id="s_en${i}" placeholder="JEE Main" value="${esc(x.name || '')}"><input id="s_ed${i}" type="date" value="${esc(x.date || '')}" style="width:156px"></div>`; }).join('')}
-    <label>Avatar emoji and colour</label><div class="row g8"><input id="s_emo" value="${esc(u.emoji)}" style="width:84px"><input id="s_col" type="color" value="${esc(u.color)}" style="width:72px;padding:3px"></div>
+    <label>Avatar and colour</label><div class="row g8"><button data-act="openShop" class="grow">Change avatar or frame</button><input id="s_col" type="color" value="${esc(u.color)}" style="width:72px;padding:3px"></div>
     <label class="row g8" style="margin-top:14px"><input id="s_fx" type="checkbox" ${fxOn() ? 'checked' : ''}> <span class="sm tx">Sound and haptics</span></label><button class="btn-p btn-xl mt12" data-act="saveSettings">Save</button><button class="btn-xl mt8" data-act="notif">Enable alerts when friends start a block</button><button class="btn-d btn-xl mt8" data-act="logout">Log out</button></section>`;
   if (I.xp_log.length) h += `<section class="card">${lbl('Recent XP')}${I.xp_log.map(x => `<div class="row between sm" style="padding:4px 0"><span class="mut">${esc(x.label)}</span><b class="num">${x.amount > 0 ? '+' : ''}${x.amount}</b></div>`).join('')}</section>`;
   return h;
@@ -1004,7 +1058,7 @@ const A = {
   copy(el) { try { navigator.clipboard?.writeText(el.dataset.v); toast(el.dataset.t || 'Invite code copied'); } catch (e) { toast('Copy failed', el.dataset.v); } },
   async saveSettings() {
     const ex = [0, 1, 2].map(i => ({ name: val('s_en' + i) || 'Exam', date: val('s_ed' + i) })).filter(x => x.date);
-    const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, emoji: val('s_emo'), color: val('s_col') }); S.user = r.user; try { localStorage.setItem('rg_fx', JSON.stringify(!!($('#s_fx') && $('#s_fx').checked))); } catch (e) { } toast('Saved'); await refresh();
+    const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, color: val('s_col') }); S.user = r.user; try { localStorage.setItem('rg_fx', JSON.stringify(!!($('#s_fx') && $('#s_fx').checked))); } catch (e) { } toast('Saved'); await refresh();
   },
   async notif() { if (!('Notification' in window)) return toast('Not supported here'); const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Alerts on while the app is open' : 'Blocked'); },
   enterFullscreenFocus() { enterFullscreenFocus(); },
@@ -1389,4 +1443,108 @@ setInterval(async () => {
   } catch (e) { }
 }, 25000);
 
-boot();
+/* ---------- DIARY (Reflect tab) ---------- */
+const dDate = d => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+const dMonth = d => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+const dLs = () => { try { return JSON.parse(localStorage.getItem('rg_draft') || '{}'); } catch (e) { return {}; } };
+const dLsSet = d => { try { localStorage.setItem('rg_draft', JSON.stringify(d)); } catch (e) { } };
+S.ddraft = dLs();
+async function diaryLoad(more) {
+  const qs = new URLSearchParams({ limit: '20' });
+  if (S.dq) qs.set('q', S.dq);
+  if (S.dmood) qs.set('mood', S.dmood);
+  if (more && S.diary && S.diary.entries.length) qs.set('before', S.diary.entries[S.diary.entries.length - 1].id);
+  const r = await api('journal?' + qs);
+  if (more) { S.diary.entries = S.diary.entries.concat(r.entries); S.diary.more = r.more; } else S.diary = r;
+}
+function vDiary() {
+  const Dy = S.diary || { entries: [], more: false, stats: { total: 0, days: 0, streak: 0, words: 0 }, otd: [] }, st = Dy.stats, ed = !!S.dedit, dr = S.ddraft || {};
+  let h = `<div class="grid3"><div class="stat"><b class="num">${st.total}</b><span class="xs mut">entries</span></div><div class="stat"><b class="num">${st.streak}</b><span class="xs mut">day writing streak</span></div><div class="stat"><b class="num">${st.words > 999 ? (st.words / 1000).toFixed(1) + 'k' : st.words}</b><span class="xs mut">words written</span></div></div>`;
+  h += `<section class="card hero">${lbl(ed ? 'Editing entry' : 'Dear diary', new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }))}
+    <label>How are you feeling?</label><div class="scale" id="d_mood">${[1, 2, 3, 4, 5].map(i => `<span class="${S.dmoodPick === i ? 'on' : ''}" data-act="dMood" data-v="${i}">${i}</span>`).join('')}</div><div class="row between xs mut mt4"><span>Low</span><span>High</span></div>
+    <input id="d_title" class="mt12" maxlength="80" placeholder="Title (optional)" value="${esc(dr.title || '')}">
+    <textarea id="d_body" class="diary-ta" maxlength="5000" placeholder="What happened today? What's on your mind? Write like nobody's reading. Nobody is.">${esc(dr.body || '')}</textarea>
+    <div class="row between mt8"><span class="xs mut" id="d_count">${(dr.body || '').length} / 5000</span><div class="row g8">${ed ? '<button data-act="dCancel">Cancel</button>' : ''}<button class="btn-p" data-act="dSave">${ed ? 'Save changes' : 'Save entry'}</button></div></div>
+    <div class="xs mut mt8">Private to you. Your draft auto-saves on this device.</div></section>`;
+  if (Dy.otd && Dy.otd.length) h += `<section class="card">${lbl('On this day')}${Dy.otd.map(o => `<div class="otd"><div class="xs mut">${esc(o.label)} · ${dDate(o.day)} · mood ${o.mood}/5</div><div class="sm">${esc((o.title ? o.title + ': ' : '') + o.body.slice(0, 140))}${o.body.length > 140 ? '…' : ''}</div></div>`).join('')}</section>`;
+  h += `<section class="card">${lbl('Your diary', `${st.days} day${st.days === 1 ? '' : 's'} written`)}<div class="row g8"><input id="d_q" placeholder="Search your entries" value="${esc(S.dq)}"><button data-act="dSearch">Search</button></div>
+    <div class="mt8">${seg([['0', 'All'], ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']], String(S.dmood), 'dMoodF')}</div>`;
+  if (!Dy.entries.length) h += `<div class="mut sm c" style="padding:18px 0">${S.dq || S.dmood ? 'Nothing matches.' : 'No entries yet. Your first page is one tap away.'}</div>`;
+  let mo = '';
+  Dy.entries.forEach(e => {
+    const m = dMonth(e.day); if (m !== mo) { h += `<div class="monthsep">${esc(m)}</div>`; mo = m; }
+    const open = !!S.dopen[e.id];
+    h += `<div class="entry ${open ? 'open' : ''}" data-act="dOpen" data-id="${e.id}"><div class="row between g8"><b class="${open ? '' : 'ell'}">${esc(e.title) || dDate(e.day)}</b><span class="pill">${e.mood}/5</span></div>
+      <div class="xs mut">${dDate(e.day)} · ${new Date(e.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${e.edited_ts ? ' · edited' : ''}</div>
+      <div class="etext">${esc(e.body)}</div>${open ? `<div class="row g8 mt12"><button class="btn-s" data-act="dEdit" data-id="${e.id}">Edit</button><button class="btn-d btn-s" data-act="dDel" data-id="${e.id}">Delete</button></div>` : ''}</div>`;
+  });
+  if (Dy.more) h += '<button class="btn-xl mt12" data-act="dMore">Load older entries</button>';
+  return h + '</section>';
+}
+function vReflect() {
+  const P = vReflectParts();
+  const body = S.reflSub === 'check' ? P.check : S.reflSub === 'weekly' ? P.weekly : S.reflSub === 'report' ? vReport() : vDiary();
+  return `<div class="float">${seg([['diary', 'Diary'], ['check', 'Check-in'], ['weekly', 'Weekly'], ['report', 'Report']], S.reflSub, 'reflSub')}</div>` + body;
+}
+document.addEventListener('input', e => {
+  const id = e.target.id;
+  if (id === 'd_body' || id === 'd_title') {
+    S.ddraft = S.ddraft || {}; S.ddraft[id === 'd_body' ? 'body' : 'title'] = e.target.value;
+    if (!S.dedit) dLsSet(S.ddraft);
+    if (id === 'd_body') { const c = $('#d_count'); if (c) c.textContent = e.target.value.length + ' / 5000'; }
+  }
+  if (id === 'd_q') S.dq = e.target.value;
+});
+document.addEventListener('keydown', e => { if (e.target.id === 'd_q' && e.key === 'Enter') A.dSearch(); });
+
+/* ---------- notification bell ---------- */
+const BELL = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
+function bellDraw() {
+  let b = $('#bell');
+  if (!S.user) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('button'); b.id = 'bell'; b.dataset.act = 'bell'; b.setAttribute('aria-label', 'Notifications'); document.body.appendChild(b); }
+  b.innerHTML = BELL + (NOTIF.count ? `<i class="nb">${NOTIF.count > 9 ? '9+' : NOTIF.count}</i>` : '');
+}
+async function notifRefresh() {
+  if (!S.user || document.hidden) return;
+  try { const res = await fetch('/api/notifs?count=1'); if (!res.ok) return; NOTIF.count = (await res.json()).count; bellDraw(); } catch (e) { }
+}
+setInterval(notifRefresh, 15000);
+
+Object.assign(A, {
+  async crewSec(el) { S.crewSec = el.dataset.v; if (S.crewSec === 'shop') { try { S.shop = await api('shop'); } catch (e) { } } render(); $('.float .on')?.scrollIntoView({ inline: 'center', block: 'nearest' }); },
+  async openShop() { S.crewSec = 'shop'; await go('crew'); },
+  async setStarter(el) { try { const r = await api('settings', { emoji: el.dataset.v }); S.user = r.user; S.shop = await api('shop'); await refresh(); } catch (e) { } },
+  async reflSub(el) { S.reflSub = el.dataset.v; if (S.reflSub === 'diary' && !S.diary) { try { await diaryLoad(); } catch (e) { } } render(); },
+  dMood(el) { S.dmoodPick = +el.dataset.v; $$('#d_mood span').forEach(x => x.classList.toggle('on', x === el)); },
+  async dSave() {
+    const body = ($('#d_body').value || '').trim(); if (!body) return toast('Write something first');
+    try {
+      await api('journal', { id: S.dedit || undefined, title: $('#d_title').value, body, mood: S.dmoodPick });
+      const was = !!S.dedit; S.dedit = null; S.ddraft = { title: '', body: '' }; dLsSet(S.ddraft); S.dmoodPick = 3;
+      await diaryLoad(); toast(was ? 'Entry updated' : 'Saved to your diary'); render(); window.scrollTo(0, 0);
+    } catch (e) { }
+  },
+  dEdit(el) { const e = S.diary.entries.find(x => x.id === +el.dataset.id); if (!e) return; S.dedit = e.id; S.ddraft = { title: e.title, body: e.body }; S.dmoodPick = e.mood; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
+  dCancel() { S.dedit = null; S.ddraft = dLs(); S.dmoodPick = 3; render(); },
+  dOpen(el) { const id = +el.dataset.id; S.dopen[id] = !S.dopen[id]; render(); },
+  async dDel(el) { if (!(await confirmSheet('Delete this entry? This cannot be undone.', 'Delete', true))) return; try { await api('journal/delete', { id: +el.dataset.id }); await diaryLoad(); render(); } catch (e) { } },
+  async dMore() { try { await diaryLoad(true); render(); } catch (e) { } },
+  async dSearch() { try { await diaryLoad(); render(); } catch (e) { } },
+  async dMoodF(el) { S.dmood = +el.dataset.v; try { await diaryLoad(); render(); } catch (e) { } },
+  async bell() {
+    try {
+      const r = await api('notifs');
+      modal(`<div class="row between"><h2>Notifications</h2><button class="btn-s" data-act="closeModal">Close</button></div>
+        ${r.nudges.map(n => `<div class="q"><span>${avatar(n.emoji, n.color, 'sm', null, n)}</span><div class="grow sm"><b>${esc(n.display)}</b> nudged you. Go earn your day.</div></div>`).join('')}
+        ${r.chat ? `<div class="q" data-act="notifChat" style="cursor:pointer"><div class="grow"><b>${r.chat} unread message${r.chat > 1 ? 's' : ''}</b><div class="xs mut">Open chat</div></div></div>` : ''}
+        ${lbl('Crew activity')}
+        ${r.items.length ? r.items.map(i => `<div class="feed ${i.new ? 'isnew' : ''}"><div class="row g8">${avatar(i.emoji, i.color, 'sm', null, i)}<div class="grow sm"><b>${esc(i.display)}</b> ${esc(i.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(i.ts)}</span></div></div>`).join('') : '<div class="mut sm c" style="padding:16px">All quiet.</div>'}`);
+      await api('notifs/seen', {}); NOTIF.count = 0; bellDraw();
+    } catch (e) { }
+  },
+  async notifChat() { closeModal(); await go('chat'); },
+});
+
+
+boot(); notifRefresh();

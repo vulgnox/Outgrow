@@ -7,6 +7,8 @@ Run:  python3 server.py        (then open http://localhost:8765)
 """
 import csv
 import datetime as dt
+import email.utils
+import gzip
 import hashlib
 import json
 import math
@@ -25,7 +27,13 @@ import time
 import traceback
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
+
+import social_db
+import social_friends
+import social_perms
+import social_profiles
+import social_voice
 
 def env(name, default=""):
     """RAGDAMAXING_<NAME> wins; the old OUTGROW_<NAME> still works so existing configs keep working."""
@@ -52,6 +60,7 @@ ROLLOVER_HOUR = 3  # a "day" ends at 3 AM, so late-night study still counts for 
 SUBJECTS = ["Physics", "Chemistry", "Maths", "English", "Other"]
 CORE = ["Physics", "Chemistry", "Maths"]
 EMOJIS = ["🔥", "💪", "👏", "😤", "🫡"]
+DEFAULT_AVATARS = ["🦊", "🐺", "🦅", "🐉", "🦁", "🐯", "🦈", "🔥", "🐼", "🦉", "🐙", "🦄", "🐻", "🦋", "🐸"]  # free for everyone
 
 HABITS = [
     ("exercise", "Exercise", "💪", 40),
@@ -142,6 +151,9 @@ CREATE TABLE IF NOT EXISTS habits(user_id INTEGER, day TEXT, habit TEXT, PRIMARY
 CREATE TABLE IF NOT EXISTS plans(id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, text TEXT, cue TEXT DEFAULT '', done INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS reflections(id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, mood INTEGER, energy INTEGER,
  win TEXT, leak TEXT, kind_note TEXT, tomorrow TEXT, UNIQUE(user_id, day));
+CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, day TEXT, ts TEXT, title TEXT DEFAULT '',
+ body TEXT, mood INTEGER DEFAULT 3, edited_ts TEXT);
+CREATE INDEX IF NOT EXISTS idx_journal_user ON journal(user_id, id);
 CREATE TABLE IF NOT EXISTS weekly(id INTEGER PRIMARY KEY, user_id INTEGER, week TEXT, best TEXT, leak TEXT, change TEXT,
  premortem TEXT, ifthen TEXT, UNIQUE(user_id, week));
 CREATE TABLE IF NOT EXISTS chapters(id INTEGER PRIMARY KEY, user_id INTEGER, subject TEXT, grade TEXT, name TEXT,
@@ -178,7 +190,17 @@ CREATE TABLE IF NOT EXISTS pomo(user_id INTEGER PRIMARY KEY, subject TEXT, total
 def connect():
     conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
+    # Keep reads fast under concurrent chat traffic. WAL is shared by every
+    # connection; the rest are per-connection knobs, so this stays cheap.
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=15000")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA cache_size=-20000")
+    try:
+        conn.execute("PRAGMA mmap_size=134217728")
+    except sqlite3.DatabaseError:
+        pass
     return conn
 
 
@@ -871,11 +893,20 @@ def make_code():
 
 
 ROUTES = {}
+PREFIX_ROUTES = []
 
 
 def route(method, path, auth=True):
     def deco(fn):
         ROUTES[(method, path)] = (fn, auth)
+        return fn
+    return deco
+
+
+def route_prefix(method, prefix, auth=True):
+    """Register a handler for a path prefix. The unused tail is exposed as c.tail."""
+    def deco(fn):
+        PREFIX_ROUTES.append((method, prefix, fn, auth))
         return fn
     return deco
 
@@ -907,9 +938,10 @@ def api_register(c):
     exams = json.dumps([{"name": "Exams (set your real dates in Me)", "date": "2027-02-15"}])
     cur = c.conn.execute("""INSERT INTO users(username,display,pw_hash,salt,crew_id,color,emoji,exams,created_at,last_settled)
         VALUES(?,?,?,?,?,?,?,?,?,?)""", (name, name, hash_pw(pin, salt), salt, crew_id, colors[n % len(colors)],
-                                          random.choice(["🦊", "🐺", "🦅", "🐉", "🦁", "🐯", "🦈", "🔥"]), exams,
+                                          random.choice(DEFAULT_AVATARS), exams,
                                           now().isoformat(timespec="seconds"), iso(today() - D(1))))
     uid = cur.lastrowid
+    c.conn.execute("UPDATE users SET feed_seen=(SELECT COALESCE(MAX(id),0) FROM feed WHERE crew_id=?) WHERE id=?", (crew_id, uid))
     c.user = q1(c.conn, "SELECT * FROM users WHERE id=?", (uid,))
     new_session(c, uid)
     # Season 0: carry over the original growth tracker history
@@ -958,7 +990,12 @@ def api_ping(c):
 
 @route("GET", "/api/me")
 def api_me(c):
-    return {"user": public_user(c.user), "level": level_info(total_xp(c.conn, c.user["id"])),
+    user = public_user(c.user)
+    soc = social_profiles.social_card(c.conn, c.user["id"], c.user["id"])
+    user["pimg"] = soc["avatar"]
+    if soc["status"]:
+        user["status"] = soc["status"]
+    return {"user": user, "level": level_info(total_xp(c.conn, c.user["id"])),
             "habit_defs": [{"id": h[0], "name": h[1], "emoji": h[2], "xp": h[3]} for h in HABITS], "subjects": SUBJECTS}
 
 
@@ -977,8 +1014,12 @@ def api_settings(c):
         fields["daily_min"] = max(15, min(240, need(c, "daily_min", int)))
     if "color" in b and re.fullmatch(r"#[0-9a-fA-F]{6}", str(b["color"])):
         fields["color"] = b["color"]
-    if "emoji" in b:
-        fields["emoji"] = str(b["emoji"])[:4] or u["emoji"]
+    if "emoji" in b:  # starter avatars only (or keep the one you already have). Picking one clears a sigil avatar.
+        new = str(b["emoji"])[:4]
+        if new in DEFAULT_AVATARS or new == u["emoji"]:
+            fields["emoji"] = new
+            if new != u["emoji"]:
+                fields["av"] = ""
     if "exams" in b and isinstance(b["exams"], list):
         ex = []
         for e in b["exams"][:8]:
@@ -1811,12 +1852,12 @@ def api_growth(c):
 
 @route("GET", "/api/profile")
 def api_profile(c):
-    """Public profile of a crew member. Same-crew only. Never exposes DMs, reflections, mood, urges or test scores."""
+    """Public profile of someone you share a crew/server with, or a friend. Never exposes DMs, reflections, mood, urges or test scores."""
     me = c.user
-    if not me["crew_id"]:
-        raise ApiError("Join a crew first", 403)
     uid = qpi(c, "uid")
-    if not q1(c.conn, "SELECT id FROM users WHERE id=? AND crew_id=?", (uid, me["crew_id"])):
+    if not q1(c.conn, "SELECT id FROM users WHERE id=?", (uid,)):
+        raise ApiError("No such member", 404)
+    if not social_profiles.can_view(c.conn, me, uid):
         raise ApiError("No such member", 404)
     p = settle(c.conn, uid)
     t = today()
@@ -1842,14 +1883,15 @@ def api_profile(c):
     duels = q1(c.conn, "SELECT COUNT(*) n, COALESCE(SUM(winner=?),0) w FROM duels WHERE status='done' AND (a=? OR b=?)", (uid, uid, uid))
     live = q1(c.conn, "SELECT subject, mode FROM timers WHERE user_id=?", (uid,))
     recent = q(c.conn, "SELECT ts, text FROM feed WHERE user_id=? AND kind<>'join' ORDER BY id DESC LIMIT 8", (uid,))
+    soc = social_profiles.social_card(c.conn, uid, me["id"])
     return {"user": {"id": p["id"], "display": p["display"], "emoji": p["emoji"], "color": p["color"], "identity": p["identity"], "me": uid == me["id"],
-                     "av": p["av"] or "", "fr": p["fr"] or "", "titles": season_titles(c.conn, p)},
+                     "av": p["av"] or "", "fr": p["fr"] or "", "pimg": soc["avatar"], "titles": season_titles(c.conn, p)},
             "level": level_info(total_xp(c.conn, uid)), "streak": {"now": sv["now"], "longest": max(p["longest"], sv["now"])},
             "live": live, "today_min": st["total"],
             "stats": {"hours": round(s["minutes"] / 60, 1), "xp": total_xp(c.conn, uid), "best_day": s["best_day"], "best_session": s["best_session"],
                       "deep": s["deep"], "floor_days": sum(1 for v in stt.values() if qualifies(v, p["daily_min"])), "sessions": s["sessions"]},
             "heat": heat, "weeks": weeks, "sub30": sub30, "badges": shelf, "badge_total": len(BADGES),
-            "duels": {"played": duels["n"], "won": duels["w"]}, "recent": recent}
+            "duels": {"played": duels["n"], "won": duels["w"]}, "recent": recent, "social": soc}
 
 
 @route("POST", "/api/react")
@@ -2122,8 +2164,9 @@ def chat_thread(c, key):
     if not m:
         raise ApiError("bad thread")
     oid = int(m.group(1))
-    other = q1(c.conn, "SELECT id, display, emoji, color, crew_id FROM users WHERE id=?", (oid,))
-    if not other or other["crew_id"] != u["crew_id"] or oid == u["id"]:
+    other = q1(c.conn, "SELECT id, display, emoji, color, crew_id, av, fr FROM users WHERE id=?", (oid,))
+    # friends or a shared server (crew still counts), and never across a block
+    if not other or oid == u["id"] or not social_friends.can_dm(c.conn, u["id"], oid):
         raise ApiError("No such member", 404)
     lo, hi = sorted((u["id"], oid))
     return f"dm:{lo}:{hi}", other
@@ -2191,7 +2234,8 @@ def chat_pack(conn, rows, uid):
     rids = list({r["reply_to"] for r in rows if r.get("reply_to")})
     refs = {}
     if rids:
-        refs = {r["id"]: r for r in q(conn, f"SELECT id, sender, body, deleted FROM messages WHERE id IN ({','.join('?' * len(rids))})", rids)}
+        refs = {r["id"]: r for r in q(conn, f"SELECT id, sender, body, deleted, sticker FROM messages WHERE id IN ({','.join('?' * len(rids))})", rids)}
+    meta = social_media.msg_meta(conn, [r["id"] for r in rows])
     out = []
     for r in rows:
         m = {"id": r["id"], "uid": r["sender"], "ts": r["ts"], "text": r["body"], "edited": bool(r.get("edited"))}
@@ -2199,9 +2243,17 @@ def chat_pack(conn, rows, uid):
             m["re"] = re_[r["id"]]
         if r["id"] in mine:
             m["mine"] = mine[r["id"]]
+        if r.get("sticker"):
+            m["sticker"] = r["sticker"]
+        pv = social_media.parse_preview(r.get("preview"))
+        if pv:
+            m["preview"] = pv
+        if meta.get(r["id"]):
+            m["files"] = meta[r["id"]]
         rf = refs.get(r.get("reply_to"))
         if rf:
-            m["reply"] = {"id": rf["id"], "uid": rf["sender"], "text": "deleted message" if rf["deleted"] else rf["body"][:90]}
+            label = "deleted message" if rf["deleted"] else (rf["body"] or ("sticker" if rf.get("sticker") else "attachment"))
+            m["reply"] = {"id": rf["id"], "uid": rf["sender"], "text": label[:90]}
         out.append(m)
     return out
 
@@ -2225,9 +2277,9 @@ def chat_states(conn, thread, first, uid):
 
 def chat_fetch(conn, thread, after=0, before=0, limit=60):
     if after:
-        rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE thread=? AND id>? AND deleted=0 ORDER BY id LIMIT 200", (thread, after))
+        rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited,sticker,preview FROM messages WHERE thread=? AND id>? AND deleted=0 ORDER BY id LIMIT 200", (thread, after))
         return rows, False
-    rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE thread=? AND id<? AND deleted=0 ORDER BY id DESC LIMIT ?",
+    rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited,sticker,preview FROM messages WHERE thread=? AND id<? AND deleted=0 ORDER BY id DESC LIMIT ?",
              (thread, before or 2 ** 62, limit + 1))
     return rows[:limit][::-1], len(rows) > limit
 
@@ -2257,7 +2309,7 @@ def chat_threads(c):
 @route("GET", "/api/chat/messages")
 def chat_messages(c):
     u = c.user
-    thread, _ = chat_thread(c, qp(c, "thread"))
+    thread, other = chat_thread(c, qp(c, "thread"))
     after, before, first = qpi(c, "after"), qpi(c, "before"), qpi(c, "first")
     wait, seq0 = min(qpi(c, "wait"), 25), qpi(c, "seq", -1)
     rows, more = chat_fetch(c.conn, thread, after, before)
@@ -2274,16 +2326,31 @@ def chat_messages(c):
     if first:
         deleted = [r["id"] for r in q(c.conn, "SELECT id FROM messages WHERE thread=? AND deleted=1 AND id>=? ORDER BY id DESC LIMIT 100", (thread, first))]
     unread = chat_unread(c.conn, u)
+    people = chat_people(c.conn, u["crew_id"])
+    people[u["id"]] = {"display": u["display"], "emoji": u["emoji"], "color": u["color"], "av": u.get("av") or "", "fr": u.get("fr") or ""}
+    if other:
+        people[other["id"]] = {"display": other["display"], "emoji": other["emoji"], "color": other["color"],
+                               "av": other.get("av") or "", "fr": other.get("fr") or ""}
+    blocked = social_friends.block_set(c.conn, u["id"])
+    if blocked:
+        rows = [r for r in rows if r["sender"] not in blocked]
     return {"messages": chat_pack(c.conn, rows, u["id"]), "more": more, "deleted": deleted, "seq": CHAT_SEQ,
             "states": chat_states(c.conn, thread, first, u["id"]) if first else {},
-            "people": chat_people(c.conn, u["crew_id"]), "unread": unread, "total": sum(unread.values())}
+            "people": people, "unread": unread, "total": sum(unread.values())}
 
 
 @route("POST", "/api/chat/send")
 def chat_send(c):
     u = c.user
     thread, other = chat_thread(c, str(c.body.get("thread", "")))
-    text = chat_clean(c.body.get("text"))
+    sticker = str(c.body.get("sticker") or "")[:40]
+    files = c.body.get("files") or []
+    if sticker and sticker not in social_media.STICKER_BY_ID:
+        raise ApiError("Unknown sticker")
+    raw = str(c.body.get("text") or "")
+    if not raw.strip() and not sticker and not files:
+        raise ApiError("Say something first")
+    text = chat_clean(raw) if raw.strip() else ""
     recent = [t for t in CHAT_RATE.get(u["id"], []) if time.time() - t < 20]
     if len(recent) >= 10:
         raise ApiError("Slow down 😅", 429)
@@ -2295,11 +2362,14 @@ def chat_send(c):
         rid = 0
     if rid and q1(c.conn, "SELECT 1 x FROM messages WHERE id=? AND thread=? AND deleted=0", (rid, thread)):
         reply_to = rid
+    preview = social_media.preview_for(c.conn, text) if text else ""
     ts = now().isoformat(timespec="seconds")
-    cur = c.conn.execute("INSERT INTO messages(thread,sender,recip,ts,body,reply_to) VALUES(?,?,?,?,?,?)",
-                         (thread, u["id"], other["id"] if other else None, ts, text, reply_to))
-    chat_mark(c.conn, u["id"], thread, cur.lastrowid)
-    row = q1(c.conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE id=?", (cur.lastrowid,))
+    cur = c.conn.execute("INSERT INTO messages(thread,sender,recip,ts,body,reply_to,sticker,preview) VALUES(?,?,?,?,?,?,?,?)",
+                         (thread, u["id"], other["id"] if other else None, ts, text, reply_to, sticker, preview))
+    mid = cur.lastrowid
+    social_media.attach(c.conn, u["id"], thread, mid, files)
+    chat_mark(c.conn, u["id"], thread, mid)
+    row = q1(c.conn, "SELECT id,sender,ts,body,reply_to,edited,sticker,preview FROM messages WHERE id=?", (mid,))
     msg = chat_pack(c.conn, [row], u["id"])[0]
     c.conn.commit()  # visible to waiting pollers before we wake them
     chat_bump()
@@ -2424,6 +2494,7 @@ def admin_stats(c):
                 "focus_min_today": one("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE day=?", (d0,)),
                 "focus_min_week": one("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE day>=?", (iso(wstart(today())),)),
                 "messages_total": one("SELECT COUNT(*) FROM messages WHERE deleted=0"),
+                "reports": one("SELECT COUNT(*) FROM reports WHERE status='open'"),
                 "messages_today": one("SELECT COUNT(*) FROM messages WHERE deleted=0 AND substr(ts,1,10)=?", (now().date().isoformat(),)),
                 "live_timers": one("SELECT COUNT(*) FROM timers"), "sessions": one("SELECT COUNT(*) FROM sessions")},
         "server": {"uptime_s": int(time.time() - STARTED), "rss_mb": rss_mb(), "threads": threading.active_count(),
@@ -2786,6 +2857,34 @@ COSMETICS = [  # id, kind, name, rarity, price (None = earned), how to earn, pro
      "prog": ("wchal", 4, "challenges", 1), "test": lambda s: s["wchal"] >= 4},
     {"id": "phoenix", "kind": "avatar", "name": "Phoenix", "rarity": "L", "price": None, "how": "Sit for 4 hours straight (one stopwatch block)",
      "prog": ("best_session", 240, "min", 1), "test": lambda s: s["best_session"] >= 240},
+    # ---- Lordran pack: Dark Souls-style avatars + animated auras
+    {"id": "knight", "kind": "avatar", "name": "Chosen Undead", "rarity": "C", "price": 4000},
+    {"id": "hollow", "kind": "avatar", "name": "Hollow", "rarity": "C", "price": 4500},
+    {"id": "raven", "kind": "avatar", "name": "Dusk Raven", "rarity": "R", "price": 9500},
+    {"id": "oni", "kind": "avatar", "name": "Oni Mask", "rarity": "R", "price": 12000},
+    {"id": "estus", "kind": "avatar", "name": "Estus Flask", "rarity": "R", "price": None, "how": "Finish 25 deep blocks (50+ min)",
+     "prog": ("deep", 25, "blocks", 1), "test": lambda s: s["deep"] >= 25},
+    {"id": "dragon", "kind": "avatar", "name": "Ancient Dragon", "rarity": "E", "price": 32000},
+    {"id": "sunbro", "kind": "avatar", "name": "Praise the Sun", "rarity": "E", "price": None, "how": "Start 10 timer blocks before 7 AM",
+     "prog": ("early", 10, "blocks", 1), "test": lambda s: s["early"] >= 10},
+    {"id": "moth", "kind": "avatar", "name": "Moonlight Butterfly", "rarity": "E", "price": None, "how": "Win 3 duels",
+     "prog": ("duel_wins", 3, "duels", 1), "test": lambda s: s["duel_wins"] >= 3},
+    {"id": "bonfire", "kind": "avatar", "name": "Bonfire", "rarity": "E", "price": None, "how": "Come back after a missed day, 3 times",
+     "prog": ("redeems", 3, "comebacks", 1), "test": lambda s: s["redeems"] >= 3},
+    {"id": "darksign", "kind": "avatar", "name": "Darksign", "rarity": "L", "price": None, "how": "Hold a 30-day streak",
+     "prog": ("longest", 30, "days", 1), "test": lambda s: s["longest"] >= 30},
+    {"id": "fog", "kind": "frame", "name": "Fog Gate", "rarity": "C", "price": 3000},
+    {"id": "flask", "kind": "frame", "name": "Estus Glow", "rarity": "R", "price": 9000},
+    {"id": "lightning", "kind": "frame", "name": "Lightning Spear", "rarity": "R", "price": 11000},
+    {"id": "humanity", "kind": "frame", "name": "Humanity Sprite", "rarity": "E", "price": 26000},
+    {"id": "moonlight", "kind": "frame", "name": "Moonlight Aura", "rarity": "E", "price": 30000},
+    {"id": "sunlight", "kind": "frame", "name": "Sunlight Aura", "rarity": "E", "price": 34000},
+    {"id": "kindle", "kind": "frame", "name": "Bonfire Kindled", "rarity": "E", "price": None, "how": "Log 50 hours of focus",
+     "prog": ("minutes", 3000, "h", 60), "test": lambda s: s["minutes"] >= 3000},
+    {"id": "abyss", "kind": "frame", "name": "Abyss Watcher", "rarity": "L", "price": None, "how": "Defeat 5 daily bosses with your crew",
+     "prog": ("boss_wins", 5, "bosses", 1), "test": lambda s: s["boss_wins"] >= 5},
+    {"id": "cinder", "kind": "frame", "name": "Soul of Cinder", "rarity": "M", "price": None, "how": "Hold a 60-day streak",
+     "prog": ("longest", 60, "days", 1), "test": lambda s: s["longest"] >= 60},
 ]
 COSMETIC_BY_ID = {x["id"]: x for x in COSMETICS}
 
@@ -2835,7 +2934,7 @@ def shop_view(conn, u):
             row["prog"] = {"have": round(min(s[k], need) / div, 1), "need": round(need / div, 1), "unit": unit}
         items.append(row)
     bal, spent = wallet(conn, uid)
-    return {"items": items, "wallet": bal, "spent": spent, "equipped": {"avatar": u.get("av") or "", "frame": u.get("fr") or ""}, "chal": chal_view(conn, u)}
+    return {"items": items, "defaults": DEFAULT_AVATARS, "wallet": bal, "spent": spent, "equipped": {"avatar": u.get("av") or "", "frame": u.get("fr") or ""}, "chal": chal_view(conn, u)}
 
 
 @route("GET", "/api/shop")
@@ -2876,7 +2975,114 @@ def api_shop_equip(c):
     return {"ok": True, "user": public_user(c.user)}
 
 
+# ----------------------------------------------------------------------------- diary (private: every query is scoped to the owner)
+JOURNAL_MAX = 5000
+
+
+def journal_clean(raw, limit):
+    t = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", str(raw or "").replace("\r\n", "\n")).strip()
+    return re.sub(r"\n{4,}", "\n\n\n", t)[:limit]
+
+
+@route("GET", "/api/journal")
+def journal_get(c):
+    uid, conn = c.user["id"], c.conn
+    before, search, mood = qpi(c, "before"), qp(c, "q").strip()[:80], qpi(c, "mood")
+    limit = max(1, min(40, qpi(c, "limit", 20)))
+    where, args = ["user_id=?"], [uid]
+    if before:
+        where.append("id<?")
+        args.append(before)
+    if search:
+        like = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where.append("(body LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')")
+        args += [like, like]
+    if mood:
+        where.append("mood=?")
+        args.append(mood)
+    rows = q(conn, f"SELECT id, day, ts, title, body, mood, edited_ts FROM journal WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT ?", (*args, limit + 1))
+    out = {"entries": rows[:limit], "more": len(rows) > limit}
+    if not before:
+        t = today()
+        days = {r["day"] for r in q(conn, "SELECT DISTINCT day FROM journal WHERE user_id=?", (uid,))}
+        d, streak = (t if iso(t) in days else t - D(1)), 0
+        while iso(d) in days:
+            streak += 1
+            d -= D(1)
+        row = q1(conn, "SELECT COUNT(*) n, COALESCE(SUM(length(body)),0) ch FROM journal WHERE user_id=?", (uid,))
+        out["stats"] = {"total": row["n"], "days": len(days), "streak": streak, "words": row["ch"] // 6}
+        out["otd"] = []
+        if not search and not mood:
+            for label, n in (("1 week ago", 7), ("1 month ago", 30), ("1 year ago", 365)):
+                e = q1(conn, "SELECT id, day, title, body, mood FROM journal WHERE user_id=? AND day=? ORDER BY id LIMIT 1", (uid, iso(t - D(n))))
+                if e:
+                    out["otd"].append({**e, "label": label})
+    return out
+
+
+@route("POST", "/api/journal")
+def journal_post(c):
+    uid = c.user["id"]
+    body, title = journal_clean(c.body.get("body"), JOURNAL_MAX + 1), journal_clean(c.body.get("title"), 80).replace("\n", " ")
+    if not body:
+        raise ApiError("Write something first")
+    if len(body) > JOURNAL_MAX:
+        raise ApiError(f"Max {JOURNAL_MAX} characters")
+    try:
+        mood = max(1, min(5, int(c.body.get("mood") or 3)))
+    except (TypeError, ValueError):
+        mood = 3
+    n = now().isoformat(timespec="seconds")
+    jid = c.body.get("id")
+    if jid:
+        row = q1(c.conn, "SELECT id FROM journal WHERE id=? AND user_id=?", (int(jid), uid))
+        if not row:
+            raise ApiError("not found", 404)
+        c.conn.execute("UPDATE journal SET title=?, body=?, mood=?, edited_ts=? WHERE id=?", (title, body, mood, n, row["id"]))
+        return {"ok": True, "id": row["id"]}
+    cur = c.conn.execute("INSERT INTO journal(user_id,day,ts,title,body,mood) VALUES(?,?,?,?,?,?)", (uid, iso(today()), n, title, body, mood))
+    return {"ok": True, "id": cur.lastrowid}
+
+
+@route("POST", "/api/journal/delete")
+def journal_delete(c):
+    c.conn.execute("DELETE FROM journal WHERE id=? AND user_id=?", (need(c, "id", int), c.user["id"]))
+    return {"ok": True}
+
+
+# ----------------------------------------------------------------------------- notification bell
+@route("GET", "/api/notifs")
+def notifs_get(c):
+    u, conn = c.user, c.conn
+    if not u["crew_id"]:
+        return {"count": 0, "items": [], "nudges": [], "chat": 0}
+    seen = q1(conn, "SELECT feed_seen FROM users WHERE id=?", (u["id"],))["feed_seen"] or 0
+    base = "FROM feed f JOIN users us ON us.id=f.user_id WHERE f.crew_id=? AND f.user_id<>? AND f.kind NOT IN ('session','join')"
+    nudges = q(conn, "SELECT n.id, us.display, us.emoji, us.color, us.av, us.fr FROM nudges n JOIN users us ON us.id=n.from_id WHERE n.to_id=? AND n.day=? AND n.seen=0",
+               (u["id"], iso(today())))
+    new = conn.execute(f"SELECT COUNT(*) {base} AND f.id>?", (u["crew_id"], u["id"], seen)).fetchone()[0]
+    count = min(new, 99) + len(nudges)
+    if qp(c, "count") == "1":
+        return {"count": count}
+    items = q(conn, f"SELECT f.id, f.ts, f.kind, f.text, us.display, us.emoji, us.color, us.av, us.fr {base} ORDER BY f.id DESC LIMIT 30", (u["crew_id"], u["id"]))
+    for i in items:
+        i["new"] = i["id"] > seen
+    return {"count": count, "items": items, "nudges": nudges, "chat": sum(chat_unread(conn, u).values())}
+
+
+@route("POST", "/api/notifs/seen")
+def notifs_seen(c):
+    c.conn.execute("UPDATE users SET feed_seen=(SELECT COALESCE(MAX(id),0) FROM feed WHERE crew_id=?) WHERE id=?", (c.user["crew_id"], c.user["id"]))
+    c.conn.execute("UPDATE nudges SET seen=1 WHERE to_id=?", (c.user["id"],))
+    return {"ok": True}
+
+
 # ----------------------------------------------------------------------------- http
+STATIC_CACHE = {}
+STATIC_CACHE_LOCK = threading.Lock()
+STATIC_CACHE_MAX = 128
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "Ragdamaxing/4"
     timeout = 30
@@ -2892,11 +3098,16 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def send_json(self, code, obj, cookie=None):
-        data = json.dumps(obj, default=str).encode()
+        raw = json.dumps(obj, default=str).encode()
+        gz = len(raw) >= 1024 and "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+        data = gzip.compress(raw, 5) if gz else raw
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        if gz:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         if cookie is not None:
             if cookie == "":
                 self.send_header("Set-Cookie", "og=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
@@ -2906,30 +3117,177 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def send_file(self, data, name, ctype):
+    def send_file(self, data, name, ctype, inline=False, cache=None):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.send_header("Content-Disposition",
+                         "%s; filename*=UTF-8''%s" % ("inline" if inline else "attachment", quote(name, safe="")))
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "sandbox")
+        self.send_header("Cache-Control", cache or ("private, max-age=3600" if inline else "no-store"))
         self.end_headers()
         self.wfile.write(data)
 
-    def static(self, path):
+    def send_media(self, path, name, ctype, inline=True, cache=None, etag=None):
+        """Stream an authenticated upload with validators and byte ranges.
+
+        Upload ids are immutable, so a strong ETag lets a returning browser
+        skip the body entirely. Ranges keep audio/video and large attachments
+        from being read into memory just to send the first chunk.
+        """
+        try:
+            st = os.stat(path)
+        except OSError:
+            raise ApiError("No such file", 404)
+        size = st.st_size
+        if not etag:
+            etag = '"%x-%x"' % (st.st_mtime_ns, size)
+        lastmod = email.utils.formatdate(st.st_mtime, usegmt=True)
+        cache = cache or ("private, max-age=604800" if inline else "private, max-age=3600")
+
+        inm = (self.headers.get("If-None-Match") or "").strip()
+        if inm:
+            tags = [t.strip().lstrip("W/") for t in inm.split(",")]
+            fresh = inm == "*" or etag in tags
+        else:
+            fresh = False
+        if not fresh:
+            ims = (self.headers.get("If-Modified-Since") or "").strip()
+            if ims:
+                try:
+                    when = email.utils.parsedate_to_datetime(ims).timestamp()
+                    fresh = int(st.st_mtime) <= int(when)
+                except (TypeError, ValueError, OverflowError):
+                    pass
+        if fresh:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Last-Modified", lastmod)
+            self.send_header("Cache-Control", cache)
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+            return
+
+        start, end, status = 0, size - 1, 200
+        rng = (self.headers.get("Range") or "").strip()
+        if rng:
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng)
+            if not m or "," in rng or (not m.group(1) and not m.group(2)):
+                self.send_response(416)
+                self.send_header("Content-Range", "bytes */%d" % size)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if not m.group(1):
+                suffix = int(m.group(2))
+                if suffix <= 0:
+                    start, end = size, size - 1
+                else:
+                    start = max(0, size - suffix)
+            else:
+                start = int(m.group(1))
+                end = int(m.group(2)) if m.group(2) else size - 1
+            if start >= size or end < start:
+                self.send_response(416)
+                self.send_header("Content-Range", "bytes */%d" % size)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            end = min(end, size - 1)
+            status = 206
+        length = max(0, end - start + 1)
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Disposition",
+                         "%s; filename*=UTF-8''%s" % ("inline" if inline else "attachment", quote(name, safe="")))
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", lastmod)
+        self.send_header("Cache-Control", cache)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "sandbox")
+        if status == 206:
+            self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+        self.end_headers()
+        try:
+            with open(path, "rb") as f:
+                f.seek(start)
+                left = length
+                while left > 0:
+                    chunk = f.read(min(64 * 1024, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass
+
+    def static(self, path, query=""):
         if path in ("/", ""):
             path = "/index.html"
         fp = os.path.normpath(os.path.join(STATIC, path.lstrip("/")))
         if not (fp == STATIC or fp.startswith(STATIC + os.sep)) or not os.path.isfile(fp):
             fp = os.path.join(STATIC, "index.html")
         ctype = mimetypes.guess_type(fp)[0] or "application/octet-stream"
-        with open(fp, "rb") as f:
-            data = f.read()
+        texty = ctype.startswith("text/") or "javascript" in ctype or "json" in ctype or "svg" in ctype
+        gz = texty and "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+        st = os.stat(fp)
+        key = (fp, bool(gz))
+        sig = (st.st_mtime_ns, st.st_size)
+        with STATIC_CACHE_LOCK:
+            hit = STATIC_CACHE.get(key)
+        if hit and hit[0] == sig:
+            data = hit[1]
+        else:
+            with open(fp, "rb") as f:
+                raw = f.read()
+            data = gzip.compress(raw, 6) if gz else raw
+            with STATIC_CACHE_LOCK:
+                if len(STATIC_CACHE) >= STATIC_CACHE_MAX:
+                    STATIC_CACHE.pop(next(iter(STATIC_CACHE)))
+                STATIC_CACHE[key] = (sig, data)
+        etag = '"%x-%x%s"' % (st.st_mtime_ns, st.st_size, "-gz" if gz else "")
+        lastmod = email.utils.formatdate(st.st_mtime, usegmt=True)
+        versioned = bool(parse_qs(query).get("v")) and not fp.endswith("index.html")
+        cache = "public, max-age=31536000, immutable" if versioned else "no-cache, must-revalidate"
+        inm = (self.headers.get("If-None-Match") or "").strip()
+        tags = [t.strip().lstrip("W/") for t in inm.split(",")] if inm else []
+        fresh = inm == "*" or etag in tags
+        if not fresh and not inm:
+            ims = (self.headers.get("If-Modified-Since") or "").strip()
+            if ims:
+                try:
+                    fresh = int(st.st_mtime) <= int(email.utils.parsedate_to_datetime(ims).timestamp())
+                except (TypeError, ValueError, OverflowError):
+                    pass
+        if fresh:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Last-Modified", lastmod)
+            self.send_header("Cache-Control", cache)
+            if gz:
+                self.send_header("Vary", "Accept-Encoding")
+            self.end_headers()
+            return
         self.send_response(200)
-        self.send_header("Content-Type", ctype + ("; charset=utf-8" if ctype.startswith("text") or "javascript" in ctype else ""))
+        self.send_header("Content-Type", ctype + ("; charset=utf-8" if texty else ""))
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", lastmod)
+        self.send_header("Cache-Control", cache)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if gz:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass
 
     def do_GET(self):
         self.dispatch("GET")
@@ -2940,21 +3298,32 @@ class Handler(BaseHTTPRequestHandler):
     def dispatch(self, method):
         p = urlparse(self.path)
         if method == "GET" and not p.path.startswith("/api/"):
-            return self.static(p.path)
+            return self.static(p.path, p.query)
         r = ROUTES.get((method, p.path))
+        tail = ""
+        if not r:
+            for rm, rp, rfn, rauth in PREFIX_ROUTES:
+                if rm == method and p.path.startswith(rp):
+                    r = (rfn, rauth)
+                    tail = p.path[len(rp):]
+                    break
         if not r:
             return self.send_json(404, {"error": "not found"})
         fn, auth = r
         body = {}
         if method == "POST":
             n = int(self.headers.get("Content-Length") or 0)
-            if n > 100_000:
+            limit = int(getattr(fn, "max_body", 100_000))
+            if n > limit:
                 return self.send_json(413, {"error": "too big"})
             raw = self.rfile.read(n) if n else b""
-            try:
-                body = json.loads(raw) if raw else {}
-            except Exception:
-                return self.send_json(400, {"error": "bad json"})
+            if getattr(fn, "raw", False):  # file uploads: the handler reads bytes, not JSON
+                body = {"_raw": raw}
+            else:
+                try:
+                    body = json.loads(raw) if raw else {}
+                except Exception:
+                    return self.send_json(400, {"error": "bad json"})
         conn = connect()
         try:
             user = None
@@ -2966,9 +3335,14 @@ class Handler(BaseHTTPRequestHandler):
             if auth and not user:
                 return self.send_json(401, {"error": "login"})
             c = Ctx(conn, user, body, parse_qs(p.query), self)
+            c.tail = tail
             before = level_of(total_xp(conn, user["id"])) if user and method == "POST" else None
             before_rank = level_info(total_xp(conn, user["id"]))["rank"] if before is not None else None
+            if getattr(fn, "sse", False):  # the handler owns the response (event stream)
+                return fn(Ctx(conn, user, body, parse_qs(p.query), self))
             res = fn(c)
+            if getattr(fn, "owns_response", False):
+                return
             if user:
                 hb_touch(conn, user["id"])
             if before is not None and c.user:
@@ -3024,14 +3398,22 @@ def migrate(conn):
     for table, col, ddl in (("timers", "mode", "TEXT DEFAULT 'timer'"),
                             ("messages", "reply_to", "INTEGER"),
                             ("messages", "edited", "INTEGER DEFAULT 0"),
+                            ("messages", "sticker", "TEXT DEFAULT ''"),
+                            ("messages", "preview", "TEXT DEFAULT ''"),
                             ("users", "banned", "INTEGER DEFAULT 0"),
                             ("users", "prev_crew", "INTEGER"),
                             ("users", "av", "TEXT DEFAULT ''"),
                             ("users", "fr", "TEXT DEFAULT ''"),
+                            ("users", "feed_seen", "INTEGER DEFAULT 0"),
+                            ("nudges", "seen", "INTEGER DEFAULT 0"),
                             ("timers", "last_ping", "REAL"),
                             ("timers", "away", "REAL DEFAULT 0")):
         if col not in cols(table):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+            if col == "feed_seen":
+                conn.execute("UPDATE users SET feed_seen=(SELECT COALESCE(MAX(id),0) FROM feed)")  # existing users start with a clean bell
+            if col == "seen":
+                conn.execute("UPDATE nudges SET seen=1")
             if col == "last_ping":
                 conn.execute("UPDATE timers SET last_ping=?", (time.time(),))  # blocks already running at deploy time are not penalised
     if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
@@ -3046,6 +3428,8 @@ def bootstrap():
     conn = connect()
     conn.executescript(SCHEMA)
     migrate(conn)
+    social_db.install(conn)   # additive social tables + one default server per crew
+    social_music.bootstrap(conn)  # music permission migration + cache cleanup
     import_legacy(conn)
     if not conn.execute("SELECT COUNT(*) FROM crews").fetchone()[0]:
         code = make_code()
@@ -3056,6 +3440,20 @@ def bootstrap():
     code = conn.execute("SELECT name, code FROM crews ORDER BY id LIMIT 1").fetchone()
     conn.close()
     return code
+
+
+# Social layer routes (channels, realtime stream, servers, roles, friends). Registered last.
+import social_chat
+import social_media
+import social_music
+import social_servers
+social_chat.install(sys.modules[__name__], social_db, social_perms)
+social_friends.install(sys.modules[__name__], social_db)
+social_servers.install(sys.modules[__name__], social_db, social_perms, social_chat)
+social_media.install(sys.modules[__name__], social_db, social_perms, social_chat)
+social_profiles.install(sys.modules[__name__], social_db, social_perms)
+social_voice.install(sys.modules[__name__], social_db, social_perms, social_chat)
+social_music.install(sys.modules[__name__], social_db, social_perms, social_chat, social_voice)
 
 
 class Server(ThreadingHTTPServer):

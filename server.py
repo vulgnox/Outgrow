@@ -26,7 +26,13 @@ import time
 import traceback
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
+
+import social_db
+import social_friends
+import social_perms
+import social_profiles
+import social_voice
 
 def env(name, default=""):
     """RAGDAMAXING_<NAME> wins; the old OUTGROW_<NAME> still works so existing configs keep working."""
@@ -920,11 +926,20 @@ def make_code():
 
 
 ROUTES = {}
+PREFIX_ROUTES = []
 
 
 def route(method, path, auth=True):
     def deco(fn):
         ROUTES[(method, path)] = (fn, auth)
+        return fn
+    return deco
+
+
+def route_prefix(method, prefix, auth=True):
+    """Register a handler for a path prefix. The unused tail is exposed as c.tail."""
+    def deco(fn):
+        PREFIX_ROUTES.append((method, prefix, fn, auth))
         return fn
     return deco
 
@@ -1883,12 +1898,12 @@ def api_growth(c):
 
 @route("GET", "/api/profile")
 def api_profile(c):
-    """Public profile of a crew member. Same-crew only. Never exposes DMs, reflections, mood, urges or test scores."""
+    """Public profile of someone you share a crew/server with, or a friend. Never exposes DMs, reflections, mood, urges or test scores."""
     me = c.user
-    if not me["crew_id"]:
-        raise ApiError("Join a crew first", 403)
     uid = qpi(c, "uid")
-    if not q1(c.conn, "SELECT id FROM users WHERE id=? AND crew_id=?", (uid, me["crew_id"])):
+    if not q1(c.conn, "SELECT id FROM users WHERE id=?", (uid,)):
+        raise ApiError("No such member", 404)
+    if not social_profiles.can_view(c.conn, me, uid):
         raise ApiError("No such member", 404)
     p = settle(c.conn, uid)
     t = today()
@@ -1914,14 +1929,15 @@ def api_profile(c):
     duels = q1(c.conn, "SELECT COUNT(*) n, COALESCE(SUM(winner=?),0) w FROM duels WHERE status='done' AND (a=? OR b=?)", (uid, uid, uid))
     live = q1(c.conn, "SELECT subject, mode FROM timers WHERE user_id=?", (uid,))
     recent = q(c.conn, "SELECT ts, text FROM feed WHERE user_id=? AND kind<>'join' ORDER BY id DESC LIMIT 8", (uid,))
+    soc = social_profiles.social_card(c.conn, uid, me["id"])
     return {"user": {"id": p["id"], "display": p["display"], "emoji": p["emoji"], "color": p["color"], "identity": p["identity"], "me": uid == me["id"],
-                     "av": p["av"] or "", "fr": p["fr"] or "", "titles": season_titles(c.conn, p)},
+                     "av": p["av"] or "", "fr": p["fr"] or "", "pimg": soc["avatar"], "titles": season_titles(c.conn, p)},
             "level": level_info(total_xp(c.conn, uid)), "streak": {"now": sv["now"], "longest": max(p["longest"], sv["now"])},
             "live": live, "today_min": st["total"],
             "stats": {"hours": round(s["minutes"] / 60, 1), "xp": total_xp(c.conn, uid), "best_day": s["best_day"], "best_session": s["best_session"],
                       "deep": s["deep"], "floor_days": sum(1 for v in stt.values() if qualifies(v, p["daily_min"])), "sessions": s["sessions"]},
             "heat": heat, "weeks": weeks, "sub30": sub30, "badges": shelf, "badge_total": len(BADGES),
-            "duels": {"played": duels["n"], "won": duels["w"]}, "recent": recent}
+            "duels": {"played": duels["n"], "won": duels["w"]}, "recent": recent, "social": soc}
 
 
 @route("POST", "/api/react")
@@ -2194,8 +2210,9 @@ def chat_thread(c, key):
     if not m:
         raise ApiError("bad thread")
     oid = int(m.group(1))
-    other = q1(c.conn, "SELECT id, display, emoji, color, crew_id FROM users WHERE id=?", (oid,))
-    if not other or other["crew_id"] != u["crew_id"] or oid == u["id"]:
+    other = q1(c.conn, "SELECT id, display, emoji, color, crew_id, av, fr FROM users WHERE id=?", (oid,))
+    # friends or a shared server (crew still counts), and never across a block
+    if not other or oid == u["id"] or not social_friends.can_dm(c.conn, u["id"], oid):
         raise ApiError("No such member", 404)
     lo, hi = sorted((u["id"], oid))
     return f"dm:{lo}:{hi}", other
@@ -2263,7 +2280,8 @@ def chat_pack(conn, rows, uid):
     rids = list({r["reply_to"] for r in rows if r.get("reply_to")})
     refs = {}
     if rids:
-        refs = {r["id"]: r for r in q(conn, f"SELECT id, sender, body, deleted FROM messages WHERE id IN ({','.join('?' * len(rids))})", rids)}
+        refs = {r["id"]: r for r in q(conn, f"SELECT id, sender, body, deleted, sticker FROM messages WHERE id IN ({','.join('?' * len(rids))})", rids)}
+    meta = social_media.msg_meta(conn, [r["id"] for r in rows])
     out = []
     for r in rows:
         m = {"id": r["id"], "uid": r["sender"], "ts": r["ts"], "text": r["body"], "edited": bool(r.get("edited"))}
@@ -2271,9 +2289,17 @@ def chat_pack(conn, rows, uid):
             m["re"] = re_[r["id"]]
         if r["id"] in mine:
             m["mine"] = mine[r["id"]]
+        if r.get("sticker"):
+            m["sticker"] = r["sticker"]
+        pv = social_media.parse_preview(r.get("preview"))
+        if pv:
+            m["preview"] = pv
+        if meta.get(r["id"]):
+            m["files"] = meta[r["id"]]
         rf = refs.get(r.get("reply_to"))
         if rf:
-            m["reply"] = {"id": rf["id"], "uid": rf["sender"], "text": "deleted message" if rf["deleted"] else rf["body"][:90]}
+            label = "deleted message" if rf["deleted"] else (rf["body"] or ("sticker" if rf.get("sticker") else "attachment"))
+            m["reply"] = {"id": rf["id"], "uid": rf["sender"], "text": label[:90]}
         out.append(m)
     return out
 
@@ -2297,9 +2323,9 @@ def chat_states(conn, thread, first, uid):
 
 def chat_fetch(conn, thread, after=0, before=0, limit=60):
     if after:
-        rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE thread=? AND id>? AND deleted=0 ORDER BY id LIMIT 200", (thread, after))
+        rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited,sticker,preview FROM messages WHERE thread=? AND id>? AND deleted=0 ORDER BY id LIMIT 200", (thread, after))
         return rows, False
-    rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE thread=? AND id<? AND deleted=0 ORDER BY id DESC LIMIT ?",
+    rows = q(conn, "SELECT id,sender,ts,body,reply_to,edited,sticker,preview FROM messages WHERE thread=? AND id<? AND deleted=0 ORDER BY id DESC LIMIT ?",
              (thread, before or 2 ** 62, limit + 1))
     return rows[:limit][::-1], len(rows) > limit
 
@@ -2329,7 +2355,7 @@ def chat_threads(c):
 @route("GET", "/api/chat/messages")
 def chat_messages(c):
     u = c.user
-    thread, _ = chat_thread(c, qp(c, "thread"))
+    thread, other = chat_thread(c, qp(c, "thread"))
     after, before, first = qpi(c, "after"), qpi(c, "before"), qpi(c, "first")
     wait, seq0 = min(qpi(c, "wait"), 25), qpi(c, "seq", -1)
     rows, more = chat_fetch(c.conn, thread, after, before)
@@ -2346,16 +2372,31 @@ def chat_messages(c):
     if first:
         deleted = [r["id"] for r in q(c.conn, "SELECT id FROM messages WHERE thread=? AND deleted=1 AND id>=? ORDER BY id DESC LIMIT 100", (thread, first))]
     unread = chat_unread(c.conn, u)
+    people = chat_people(c.conn, u["crew_id"])
+    people[u["id"]] = {"display": u["display"], "emoji": u["emoji"], "color": u["color"], "av": u.get("av") or "", "fr": u.get("fr") or ""}
+    if other:
+        people[other["id"]] = {"display": other["display"], "emoji": other["emoji"], "color": other["color"],
+                               "av": other.get("av") or "", "fr": other.get("fr") or ""}
+    blocked = social_friends.block_set(c.conn, u["id"])
+    if blocked:
+        rows = [r for r in rows if r["sender"] not in blocked]
     return {"messages": chat_pack(c.conn, rows, u["id"]), "more": more, "deleted": deleted, "seq": CHAT_SEQ,
             "states": chat_states(c.conn, thread, first, u["id"]) if first else {},
-            "people": chat_people(c.conn, u["crew_id"]), "unread": unread, "total": sum(unread.values())}
+            "people": people, "unread": unread, "total": sum(unread.values())}
 
 
 @route("POST", "/api/chat/send")
 def chat_send(c):
     u = c.user
     thread, other = chat_thread(c, str(c.body.get("thread", "")))
-    text = chat_clean(c.body.get("text"))
+    sticker = str(c.body.get("sticker") or "")[:40]
+    files = c.body.get("files") or []
+    if sticker and sticker not in social_media.STICKER_BY_ID:
+        raise ApiError("Unknown sticker")
+    raw = str(c.body.get("text") or "")
+    if not raw.strip() and not sticker and not files:
+        raise ApiError("Say something first")
+    text = chat_clean(raw) if raw.strip() else ""
     recent = [t for t in CHAT_RATE.get(u["id"], []) if time.time() - t < 20]
     if len(recent) >= 10:
         raise ApiError("Slow down 😅", 429)
@@ -2367,11 +2408,14 @@ def chat_send(c):
         rid = 0
     if rid and q1(c.conn, "SELECT 1 x FROM messages WHERE id=? AND thread=? AND deleted=0", (rid, thread)):
         reply_to = rid
+    preview = social_media.preview_for(c.conn, text) if text else ""
     ts = now().isoformat(timespec="seconds")
-    cur = c.conn.execute("INSERT INTO messages(thread,sender,recip,ts,body,reply_to) VALUES(?,?,?,?,?,?)",
-                         (thread, u["id"], other["id"] if other else None, ts, text, reply_to))
-    chat_mark(c.conn, u["id"], thread, cur.lastrowid)
-    row = q1(c.conn, "SELECT id,sender,ts,body,reply_to,edited FROM messages WHERE id=?", (cur.lastrowid,))
+    cur = c.conn.execute("INSERT INTO messages(thread,sender,recip,ts,body,reply_to,sticker,preview) VALUES(?,?,?,?,?,?,?,?)",
+                         (thread, u["id"], other["id"] if other else None, ts, text, reply_to, sticker, preview))
+    mid = cur.lastrowid
+    social_media.attach(c.conn, u["id"], thread, mid, files)
+    chat_mark(c.conn, u["id"], thread, mid)
+    row = q1(c.conn, "SELECT id,sender,ts,body,reply_to,edited,sticker,preview FROM messages WHERE id=?", (mid,))
     msg = chat_pack(c.conn, [row], u["id"])[0]
     c.conn.commit()  # visible to waiting pollers before we wake them
     chat_bump()
@@ -2496,6 +2540,7 @@ def admin_stats(c):
                 "focus_min_today": one("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE day=?", (d0,)),
                 "focus_min_week": one("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE day>=?", (iso(wstart(today())),)),
                 "messages_total": one("SELECT COUNT(*) FROM messages WHERE deleted=0"),
+                "reports": one("SELECT COUNT(*) FROM reports WHERE status='open'"),
                 "messages_today": one("SELECT COUNT(*) FROM messages WHERE deleted=0 AND substr(ts,1,10)=?", (now().date().isoformat(),)),
                 "live_timers": one("SELECT COUNT(*) FROM timers"), "sessions": one("SELECT COUNT(*) FROM sessions")},
         "server": {"uptime_s": int(time.time() - STARTED), "rss_mb": rss_mb(), "threads": threading.active_count(),
@@ -3128,7 +3173,7 @@ class Handler(BaseHTTPRequestHandler):
         if gz:
             data = gzip.compress(data, 5)
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         if gz:
@@ -3143,12 +3188,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def send_file(self, data, name, ctype):
+    def send_file(self, data, name, ctype, inline=False, cache=None):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.send_header("Content-Disposition",
+                         "%s; filename*=UTF-8''%s" % ("inline" if inline else "attachment", quote(name, safe="")))
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "sandbox")
+        self.send_header("Cache-Control", cache or ("private, max-age=3600" if inline else "no-store"))
         self.end_headers()
         self.wfile.write(data)
 
@@ -3197,6 +3245,13 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and not p.path.startswith("/api/"):
             return self.static(p.path, p.query)
         r = ROUTES.get((method, p.path))
+        tail = ""
+        if not r:
+            for rm, rp, rfn, rauth in PREFIX_ROUTES:
+                if rm == method and p.path.startswith(rp):
+                    r = (rfn, rauth)
+                    tail = p.path[len(rp):]
+                    break
         if not r:
             return self.send_json(404, {"error": "not found"})
         fn, auth = r
@@ -3207,10 +3262,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True   # body left unread: this socket cannot be reused
                 return self.send_json(413, {"error": "too big"})
             raw = self.rfile.read(n) if n else b""
-            try:
-                body = json.loads(raw) if raw else {}
-            except Exception:
-                return self.send_json(400, {"error": "bad json"})
+            if getattr(fn, "raw", False):  # file uploads: the handler reads bytes, not JSON
+                body = {"_raw": raw}
+            else:
+                try:
+                    body = json.loads(raw) if raw else {}
+                except Exception:
+                    return self.send_json(400, {"error": "bad json"})
         conn = connect()
         try:
             user = None
@@ -3222,9 +3280,14 @@ class Handler(BaseHTTPRequestHandler):
             if auth and not user:
                 return self.send_json(401, {"error": "login"})
             c = Ctx(conn, user, body, parse_qs(p.query), self)
+            c.tail = tail
             before = level_of(total_xp(conn, user["id"])) if user and method == "POST" else None
             before_rank = level_info(total_xp(conn, user["id"]))["rank"] if before is not None else None
+            if getattr(fn, "sse", False):  # the handler owns the response (event stream)
+                return fn(Ctx(conn, user, body, parse_qs(p.query), self))
             res = fn(c)
+            if getattr(fn, "owns_response", False):
+                return
             if user:
                 hb_touch(conn, user["id"])
             if before is not None and c.user:
@@ -3282,6 +3345,8 @@ def migrate(conn):
     for table, col, ddl in (("timers", "mode", "TEXT DEFAULT 'timer'"),
                             ("messages", "reply_to", "INTEGER"),
                             ("messages", "edited", "INTEGER DEFAULT 0"),
+                            ("messages", "sticker", "TEXT DEFAULT ''"),
+                            ("messages", "preview", "TEXT DEFAULT ''"),
                             ("users", "banned", "INTEGER DEFAULT 0"),
                             ("users", "prev_crew", "INTEGER"),
                             ("users", "av", "TEXT DEFAULT ''"),
@@ -3311,6 +3376,8 @@ def bootstrap():
     conn.execute("PRAGMA journal_mode=WAL")   # persistent; set once instead of on every request (P-08)
     conn.executescript(SCHEMA)
     migrate(conn)
+    social_db.install(conn)   # additive social tables + one default server per crew
+    social_music.bootstrap(conn)  # music permission migration + cache cleanup
     import_legacy(conn)
     if not conn.execute("SELECT COUNT(*) FROM crews").fetchone()[0]:
         code = make_code()
@@ -3321,6 +3388,20 @@ def bootstrap():
     code = conn.execute("SELECT name, code FROM crews ORDER BY id LIMIT 1").fetchone()
     conn.close()
     return code
+
+
+# Social layer routes (channels, realtime stream, servers, roles, friends). Registered last.
+import social_chat
+import social_media
+import social_music
+import social_servers
+social_chat.install(sys.modules[__name__], social_db, social_perms)
+social_friends.install(sys.modules[__name__], social_db)
+social_servers.install(sys.modules[__name__], social_db, social_perms, social_chat)
+social_media.install(sys.modules[__name__], social_db, social_perms, social_chat)
+social_profiles.install(sys.modules[__name__], social_db, social_perms)
+social_voice.install(sys.modules[__name__], social_db, social_perms, social_chat)
+social_music.install(sys.modules[__name__], social_db, social_perms, social_chat, social_voice)
 
 
 class Server(ThreadingHTTPServer):

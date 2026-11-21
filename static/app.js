@@ -57,6 +57,45 @@ const IC = {
   crown: '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/>',
   left: '<path d="m15 5-7 7 7 7"/>', right: '<path d="m9 5 7 7-7 7"/>',
   bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/>',
+  users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.2c2.5.3 4 2.2 4 5"/>',
+  settings: '<path d="M4 7h8M16 7h4M4 17h4M12 17h8"/><circle cx="14" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  attach: '<path d="M20.5 11.5 12 20a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 18a2 2 0 0 1-3-3l7.5-7.5"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5"/>',
+  reply: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v4"/>',
+  palette: '<path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 0-5H12a3 3 0 0 1 0-6h4a2 2 0 0 0 2-2 4 4 0 0 0-6-5z"/><circle cx="7.5" cy="10.5" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="15" r=".9" fill="currentColor" stroke="none"/><circle cx="11" cy="7" r=".9" fill="currentColor" stroke="none"/>',
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"/>',
+  micOff: '<path d="M3 3l18 18M9 9v2a3 3 0 0 0 4.6 2.5M15 10V5a3 3 0 0 0-5.9-.7M5 10v2a7 7 0 0 0 11.4 5.4M19 10v2a7 7 0 0 1-.3 2M12 19v3"/>',
+  headphones: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="7" rx="2"/><rect x="17" y="14" width="4" height="7" rx="2"/>',
+  volume: '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a9 9 0 0 1 0 12"/>',
+  volumeOff: '<path d="M11 5 6 9H3v6h3l5 4zM16 9l5 6M21 9l-5 6"/>',
+  volumeLow: '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 9.5a4 4 0 0 1 0 5"/>',
+  monitor: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  stats: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  flag: '<path d="M5 21V4h9l1 3h5v9h-6l-1-3H5"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+  sticker: '<path d="M21 3H3v18h18z"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  play: '<path d="m6 4 14 8-14 8z"/>',
+  pause: '<path d="M7 4v16M17 4v16"/>',
+  skip: '<path d="m5 4 10 8-10 8zM19 4v16"/>',
+  repeat: '<path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/>',
+  repeat1: '<path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/><path d="M11 10h1v5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+  server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1-2-2z"/><path d="M4 17h16"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
+  gem: '<path d="m6 3 6 18 6-18zM3 8h18M9 3l3 5 3-5"/>',
+  trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3"/>',
+  wrench: '<path d="M14.7 6.3a4 4 0 0 0-5 5L3 18l3 3 6.7-6.7a4 4 0 0 0 5-5l-2.6 2.6-2.4-2.4z"/>',
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
 };
 const ic = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
 
@@ -78,6 +117,33 @@ function onLoggedOut() {
   S.user = null; S.ins = null; stopTick(); S.fs = false; $('#fs')?.remove(); document.body.classList.remove('noscroll');
   try { chatReset(); } catch (e) { }
   renderAuth();
+}
+
+/* Downscale and re-encode photos in the browser before upload. This keeps
+   chat images, avatars and banners fast on mobile data and saves server disk,
+   while leaving GIFs (and already-small files) untouched. */
+async function shrinkImage(file, maxDim = 2560, quality = 0.88) {
+  try {
+    if (!file || !/^image\/(png|jpeg|webp)$/i.test(file.type || '')) return file;
+    if (!window.createImageBitmap) return file;
+    let bmp;
+    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (e) { bmp = await createImageBitmap(file); }
+    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    if (scale >= 1 && file.size < 700 * 1024) { bmp.close?.(); return file; }
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d', { alpha: true });
+    if (!ctx) { bmp.close?.(); return file; }
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bmp, 0, 0, w, h); bmp.close?.();
+    const blob = await new Promise(resolve => cv.toBlob(resolve, 'image/webp', quality));
+    if (!blob || blob.type !== 'image/webp' || blob.size >= file.size) return file;
+    const base = String(file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
+    return new File([blob], base + '.webp', { type: 'image/webp', lastModified: Date.now() });
+  } catch (e) { return file; }
 }
 
 /* ---------- feedback: toasts, confetti, sound ---------- */
@@ -107,7 +173,8 @@ async function copyText(t, ok = 'Copied') {
 }
 function confetti() {
   if (reduced()) return;
-  const cols = ['#7c6af7', '#a99cff', '#3dd6a0', '#f2b441', '#ececf1'];
+  const cs = getComputedStyle(document.documentElement), pick = (k, d) => cs.getPropertyValue(k).trim() || d;
+  const cols = [pick('--acc', '#7c6af7'), pick('--acc2', '#a99cff'), pick('--acc3', '#5aa9ff'), pick('--acc5', '#f5b83d'), '#ececf1'];
   for (let i = 0; i < 30; i++) {
     const s = document.createElement('i'); s.className = 'confetti';
     s.style.left = Math.random() * 100 + 'vw'; s.style.background = cols[i % cols.length]; s.style.animationDelay = Math.random() * .5 + 's';
@@ -210,37 +277,50 @@ function sessionSummary(r) {
     <button class="btn-p btn-xl mt12" data-act="closeModal">Done</button>`);
 }
 
-/* ---------- profile sheet (same-crew, public stats only) ---------- */
+/* ---------- profile sheet (public stats + social identity) ---------- */
 async function profileOpen(id) {
   let P; try { P = await api('profile?uid=' + id); } catch (e) { return; }
-  const u = P.user, L = P.level, s = P.stats, st = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
-  const hm = P.heat.map(c => `<i title="${esc(c.d)}: ${fm(c.m)}" style="background:${c.m === 0 ? '#17171c' : `rgba(124,106,247,${Math.min(.25 + c.m / 240 * .75, 1)})`}"></i>`).join('');
+  const u = P.user, L = P.level, s = P.stats, soc = P.social || {}, st = (n, l) => `<div class="stat"><b>${n}</b><span class="xs mut">${l}</span></div>`;
+  const hm = P.heat.map(c => `<i title="${esc(c.d)}: ${fm(c.m)}" style="background:${c.m === 0 ? 'var(--s3)' : `color-mix(in srgb,var(--acc3) ${Math.round(Math.min(.25 + c.m / 240 * .75, 1) * 100)}%,var(--s3))`}"></i>`).join('');
   const subTot = Object.values(P.sub30).reduce((a, b) => a + b, 0);
-  modal(`<div class="row g8">${avatar(u.emoji, u.color, 'lg', L.rank, u)}<div class="grow"><h2>${esc(u.display)}${u.me ? ' <span class="you">you</span>' : ''}</h2>
-      <div class="rankline">${emblem(L.rank, 16)}<span>${esc(L.rank)}</span><span class="mut">· Lv ${L.level}</span></div><div class="xs mut">${P.streak.now}-day streak${P.live ? ` · <span class="live-t">live: ${esc(P.live.subject)}</span>` : ''}</div>${titleChips(u.titles)}</div></div>
+  const photo = soc.banner && !soc.banner_style;
+  const bannerCls = photo ? '' : (soc.banner_style ? ' b-' + soc.banner_style : ' ph');
+  const stat = soc.status && (soc.status.text || soc.status.emoji)
+    ? `<div class="prof-status">${soc.status.emoji ? `<span>${esc(soc.status.emoji)}</span>` : ''}${soc.status.text ? esc(soc.status.text) : ''}</div>` : '';
+  const acts = u.me
+    ? `<button class="btn-p grow" data-pact="editProfile" data-uid="${u.id}">Edit profile</button>`
+    : (soc.can_message ? `<button class="btn-p grow" data-pact="message" data-uid="${u.id}">Message</button>` : '');
+  const shared = !u.me && (soc.shared || []).length
+    ? `<div class="xs mut mt8">Also in ${soc.shared.slice(0, 3).map(esc).join(', ')}${soc.shared.length > 3 ? ` +${soc.shared.length - 3}` : ''}</div>` : '';
+  modal(`<div class="prof">
+    <div class="prof-banner${bannerCls}"${photo ? ` style="background-image:url('${esc(soc.banner)}')"` : ''}></div>
+    <div class="prof-top">${avatar(u.emoji, u.color, 'lg', L.rank, u)}<div class="grow"><h2>${esc(u.display)}${u.me ? ' <span class="you">you</span>' : ''}${soc.pronouns ? ` <span class="prof-pron">${esc(soc.pronouns)}</span>` : ''}</h2>
+      ${stat}<div class="rankline">${emblem(L.rank, 16)}<span>${esc(L.rank)}</span><span class="mut">· Lv ${L.level}</span></div><div class="xs mut">${P.streak.now}-day streak${P.live ? ` · <span class="live-t">live: ${esc(P.live.subject)}</span>` : ''}</div>${soc.since ? `<div class="xs mut">here since ${esc(soc.since)}</div>` : ''}${titleChips(u.titles)}</div></div>
+    ${acts ? `<div class="row g8 mt8">${acts}</div>` : ''}${shared}
     ${u.identity ? `<div class="quote">I am ${esc(u.identity)}</div>` : ''}
+    ${soc.bio ? `<div class="prof-bio">${esc(soc.bio)}</div>` : ''}
     <div class="bar thin mt8"><i style="width:${L.pct}%"></i></div><div class="xs mut">${L.xp.toLocaleString()} XP</div>
     <div class="grid3 mt8">${st(s.hours + 'h', 'focused')}${st(P.streak.longest, 'best streak')}${st(s.floor_days, 'floor days')}${st(fm(s.best_day), 'best day')}${st(fm(s.best_session), 'best sitting')}${st(s.deep, 'deep blocks')}</div>
     <div class="lbl2 mt8">Trophy shelf · ${P.badges.length}/${P.badge_total}</div>
     ${P.badges.length ? `<div class="grid3">${P.badges.map(b => `<div class="badge r-${b.rarity}" title="${esc(b.desc)}"><s><i>${esc(b.emoji)}</i></s><b>${esc(b.name)}</b><div class="rar">${esc(b.rname)}</div><div class="xs mut">${esc(b.day || '')}</div></div>`).join('')}</div>` : '<div class="mut sm">No badges yet.</div>'}
     <div class="lbl2 mt8">Last 12 weeks</div><div class="heat">${hm}</div>
-    <div class="lbl2 mt8">Weekly hours</div>${bars(P.weeks, '#7c6af7')}
+    <div class="lbl2 mt8">Weekly hours</div>${bars(P.weeks, 'var(--acc3)')}
     ${subTot ? `<div class="lbl2 mt8">Subjects, 30 days</div>${Object.entries(P.sub30).sort((a, b) => b[1] - a[1]).map(([k, m]) => `<div class="row g8" style="margin:5px 0"><span class="sm" style="width:78px">${esc(k)}</span><div class="bar thin grow"><i style="width:${m / subTot * 100}%;background:${SCOL[k] || '#9aa0b4'}"></i></div><span class="xs mut">${fm(m)}</span></div>`).join('')}` : ''}
     <div class="lbl2 mt8">Duels</div><div class="sm">${P.duels.won}W ${P.duels.played - P.duels.won}L</div>
     ${P.recent.length ? `<div class="lbl2 mt8">Recent</div>${P.recent.map(r => `<div class="sm" style="padding:3px 0">${esc(r.text).replace(/\*\*/g, '')} <span class="xs mut">${ago(r.ts)}</span></div>`).join('')}` : ''}
-    <button class="btn-xl mt8" data-act="closeModal">Close</button>`);
+    <button class="btn-xl mt8" data-act="closeModal">Close</button></div>`);
 }
 
 /* ---------- svg helpers ---------- */
 function bars(vals, color, h = 70) {
   const mx = Math.max(...vals, 1), w = 100 / vals.length;
-  return `<svg class="chart" viewBox="0 0 100 ${h}" preserveAspectRatio="none">` + vals.map((v, i) => { const bh = Math.max(v / mx * (h - 2), v ? 2 : 1); return `<rect x="${i * w + w * .15}" y="${h - bh}" width="${w * .7}" height="${bh}" rx="1" fill="${color}" opacity="${v ? 1 : .18}"/>`; }).join('') + '</svg>';
+  return `<svg class="chart" viewBox="0 0 100 ${h}" preserveAspectRatio="none">` + vals.map((v, i) => { const bh = Math.max(v / mx * (h - 2), v ? 2 : 1);     return `<rect x="${i * w + w * .15}" y="${h - bh}" width="${w * .7}" height="${bh}" rx="1" style="fill:${color}" opacity="${v ? 1 : .18}"/>`; }).join('') + '</svg>';
 }
 function lines(series, h = 60) {
   const all = series.flatMap(s => s.v.filter(x => x != null)); const mx = Math.max(...all, 1);
   return `<svg class="chart" viewBox="0 0 100 ${h}" preserveAspectRatio="none">` + series.map(s => {
     const pts = s.v.map((x, i) => x == null ? null : `${s.v.length > 1 ? i / (s.v.length - 1) * 100 : 50},${h - 3 - x / mx * (h - 8)}`).filter(Boolean).join(' ');
-    return `<polyline points="${pts}" fill="none" stroke="${s.c}" stroke-width="${s.w || 2}" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" ${s.d ? 'stroke-dasharray="4 4"' : ''}/>`;
+    return `<polyline points="${pts}" fill="none" style="stroke:${s.c}" stroke-width="${s.w || 2}" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" ${s.d ? 'stroke-dasharray="4 4"' : ''}/>`;
   }).join('') + '</svg>';
 }
 
@@ -270,9 +350,9 @@ const SK_COL = { ronin: '#c9ccd6', wolf: '#9db4ff', skull: '#22d3ee', eye: '#a86
 const RC = { C: '#9aa0b4', R: '#4da3ff', E: '#a86bff', L: '#f5b83d', M: '#ff5468' };
 const avatar = (emo, col, cls = '', rank = null, cos = null) => {
   const i = rank == null ? -1 : tierIdx(rank), fr = cos && cos.fr ? String(cos.fr) : '', sk = cos && cos.av && SIGIL[cos.av] ? cos.av : '';
-  const c = sk ? SK_COL[sk] : col, fx = fr ? ` fx-${esc(fr)}` : i >= 3 ? ' fr' : '';
+  const c = sk ? SK_COL[sk] : col, fx = fr ? ` fx-${esc(fr)}` : i >= 3 ? ' fr' : '', pimg = cos && cos.pimg ? String(cos.pimg) : '';
   const st = `background:${sk ? `radial-gradient(circle at 50% 30%,${c}44,#0c0c12 72%)` : esc(col) + '22'};border-color:${esc(c)}${!fr && i >= 3 ? `;--tc:${TIER_COL[i]}` : ''}`;
-  return `<div class="av ${cls}${fx}${sk ? ' sk' : ''}" style="${st}">${sk ? SIGIL[sk] : esc(emo)}</div>`;
+  return `<div class="av ${cls}${fx}${sk ? ' sk' : ''}" style="${st}">${pimg ? `<img class="av-img" src="${esc(pimg)}" alt="" loading="lazy">` : sk ? SIGIL[sk] : esc(emo)}</div>`;
 };
 const tn = rank => tierIdx(rank) >= 5 ? ` tn-hi" style="--tc:${TIER_COL[tierIdx(rank)]}` : '';
 const CAT_LABEL = { hours: 'Most Hours', improved: 'Most Improved', streak: 'Iron Streak', deep: 'Deep Diver', early: 'Early Bird' };
@@ -315,7 +395,7 @@ async function loadTab(tab) {
 }
 async function go(tab) {
   const changed = tab !== S.tab, seq = ++_navSeq;
-  S.tab = tab; chatStop(); if (tab === 'chat') CH.open = null;
+  S.tab = tab; chatStop(); if (tab === 'chat') { CH.open = null; if (window.Chat) Chat.enter(); }
   if (changed && S.user) { stopTick(); $('.fab')?.remove(); $('#app').innerHTML = skeleton(); ensureNav(); }
   try { await loadTab(tab); } catch (e) { if (e.message === 'login') return; }
   if (seq !== _navSeq) return;
@@ -387,7 +467,7 @@ function patchApp(html) {
 function render() {
   if (!S.user) return renderAuth();
   const y = window.scrollY, openK = $$('details[open][data-k]').map(d => d.dataset.k);
-  const views = { today: vToday, crew: vCrew, chat: vChat, study: vStudy, reflect: vReflect, me: vMe };
+  const views = { today: vToday, crew: vCrew, chat: (window.Chat ? Chat.view : vChat), study: vStudy, reflect: vReflect, me: vMe };
   let v;
   try { v = views[S.tab](); }
   catch (e) { console.error(e); v = '<section class="card c"><div class="b">This tab hit a snag.</div><p class="sm mut">Reload to try again.</p><button class="btn-s" data-act="reload">Reload</button></section>'; }
@@ -399,7 +479,7 @@ function render() {
   if (S.tab === 'today' && S.today && !S.fs) { const f = document.createElement('button'); f.className = 'fab'; f.dataset.act = 'urge'; f.textContent = "I'm tempted"; document.body.appendChild(f); }
   openK.forEach(k => { const d = document.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; });
   ensureNav();
-  if (S.tab === 'chat') chatAfterRender();
+  if (S.tab === 'chat') { if (window.Chat) Chat.afterRender(); else chatAfterRender(); }
   if (S.tab === 'today') startTick(); else stopTick();
   if (S.tab !== 'chat') window.scrollTo(0, y);
 }
@@ -803,7 +883,7 @@ function crewRank(C, x) {
       <div class="grow lbm" data-act="profile" data-id="${m.id}" style="cursor:pointer"><div class="lbn"><b class="ell${tn(m.level.rank)}">${esc(m.display)}</b>${m.me ? '<span class="you">you</span>' : ''}${m.crowns ? `<span class="xs mut">${ic('crown', 11)}×${m.crowns}</span>` : ''}${dotOf(m)}</div>
         <div class="xs mut ell row g4">${emblem(m.level.rank, 13)}${esc(m.level.rank)} · Lv ${m.level.level} · ${ic('flame', 11)}${m.streak} · today ${fm(m.today_min)}${m.live ? ` · <span class="live-t">live: ${esc(m.live.subject)}</span>` : ''}</div>
         <div class="bar thin mt4"><i style="width:${Math.round(p.xp / top * 100)}%;background:${esc(m.color)}"></i></div></div>
-      <div class="lbx"><b class="num">${p.xp.toLocaleString()}</b><div class="xs mut">XP · ${fm(p.min)}</div>${nudgeBtn(m)}</div></div>`;
+      <div class="lb-score"><b class="num">${p.xp.toLocaleString()}</b><div class="xs mut">XP · ${fm(p.min)}</div>${nudgeBtn(m)}</div></div>`;
   }).join('')}
     <div class="xs mut mt8"><span class="dot live"></span> live · <span class="dot g"></span> floor hit · <span class="dot y"></span> some work · <span class="dot"></span> nothing yet. A nudge gives you +5 XP. The league resets every Monday.</div></section>`;
   return h;
@@ -948,36 +1028,72 @@ function vLocker() {
     <div class="sm mut">Hard work is the currency. Spending XP never lowers your level or rank, only the balance you can spend. Some items cannot be bought: earn them.</div>
     ${seg([['frame', 'Frames'], ['avatar', 'Avatars']], tab, 'lockTab')}<div class="lk">${list.map(card).join('')}</div></section>`;
 }
+const MESECS = [['overview', 'Overview'], ['stats', 'Stats'], ['collection', 'Collection'], ['settings', 'Settings']];
 function vMe() {
   const I = S.ins, u = S.user, L = I.level, e = I.evidence, og = I.outgrow, pct = Math.round(og.ratio * 100);
-  const hm = I.heat.map(c => { const a = c.f ? '#5aa9ff66' : c.m === 0 ? '#17171c' : `rgba(124,106,247,${Math.min(.25 + c.m / 240 * .75, 1)})`; return `<i title="${esc(c.d)}: ${fm(c.m)}${c.f ? ' (freeze)' : ''}" style="background:${a}"></i>`; }).join('');
-  const hrmx = Math.max(...I.hours, 1), best = I.hours.indexOf(Math.max(...I.hours));
-  let h = `<section class="card hero"><div class="row g12">${avatar(u.emoji, u.color, 'xl', L.rank, u)}<div class="grow"><h2>${esc(u.display)}</h2><div class="rankline">${emblem(L.rank, 18)}<span>${esc(L.rank)}</span><span class="mut">· Level ${L.level} · ${L.xp.toLocaleString()} XP</span></div></div></div>
+  const sec = S.meSec || 'overview';
+  const hm = I.heat.map(c => { const a = c.f ? 'color-mix(in srgb,var(--good) 40%,transparent)' : c.m === 0 ? 'var(--s3)' : `color-mix(in srgb,var(--acc3) ${Math.round(Math.min(.25 + c.m / 240 * .75, 1) * 100)}%,var(--s3))`; return `<i title="${esc(c.d)}: ${fm(c.m)}${c.f ? ' (freeze)' : ''}" style="background:${a}"></i>`; }).join('');
+  const hrmx = Math.max(...I.hours, 1), peakHour = I.hours.indexOf(Math.max(...I.hours));
+  let h = `<section class="card hero prof-hero"><div class="row g12">${avatar(u.emoji, u.color, 'xl', L.rank, u)}<div class="grow min0"><h2>${esc(u.display)}</h2><div class="rankline">${emblem(L.rank, 18)}<span>${esc(L.rank)}</span><span class="mut">· Level ${L.level} · ${L.xp.toLocaleString()} XP</span></div></div></div>
     <div class="bar xp mt12"><i style="width:${L.pct}%"></i></div>
-    <button class="btn-xl mt12" data-act="shareCard">Share my stat card</button><details data-k="ladder"><summary>Title ladder · ${I.ladder.length} titles · ${L.next_rank ? 'next: ' + esc(L.next_rank) + ' at Lv ' + L.next_at : 'top title reached'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .4}"><span class="lad-e">${emblem(r.rank, 26)}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">you</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(r.xp || 0).toLocaleString()} XP</span></div>`).join('')}</details></section>`;
-  h += `<section class="card">${lbl('The Ragda meter')}<p class="sm mut">Your last 7 days against the old A+ you (${og.baseline_h}h a day).</p><div class="row between"><div class="bignum" style="color:${pct >= 100 ? 'var(--good)' : 'var(--tx)'}">${pct}%</div><div class="sm rt-text">${pct >= 130 ? 'You are Ragdamaxed. The old you cannot keep up.' : pct >= 100 ? 'You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
-    <div class="bar mt8 ${pct >= 100 ? 'g' : ''}"><i style="width:${Math.min(pct, 100)}%"></i></div>
-    ${I.ghost ? `<div class="lbl2">You vs your best week</div>${lines([{ v: I.ghost.cum, c: '#7c7c88', d: 1, w: 2 }, { v: I.cum, c: '#3dd6a0', w: 3 }])}<div class="xs mut">Dashed is your best week (${fm(I.ghost.total)}). Green is this week.</div>` : ''}</section>`;
-  h += `<section class="card">${lbl('Evidence locker')}<p class="sm mut">When your brain says "I'm a failure", read the court record.</p><div class="grid3"><div class="stat"><b>${e.hours}h</b><span class="xs mut">focused</span></div><div class="stat"><b>${e.days_hit}</b><span class="xs mut">floor days</span></div><div class="stat"><b>${e.longest}</b><span class="xs mut">best streak</span></div><div class="stat"><b>${e.deep}</b><span class="xs mut">deep blocks</span></div><div class="stat"><b>${e.urges_won}</b><span class="xs mut">urges beaten</span></div><div class="stat"><b>${e.learned}</b><span class="xs mut">chapters</span></div></div>
-    ${e.wins.length ? '<div class="lbl2">Your own wins</div>' + e.wins.map(w => `<div class="sm" style="padding:3px 0">${esc(w.win)} <span class="xs mut">${esc(w.day)}</span></div>`).join('') : ''}</section>`;
-  const G = S.growth;
-  if (G) {
-    const W = G.weeks, cur = W[11], prv = W[10], avg4 = k => { const v = W.slice(6, 10).map(x => x[k]); return v.reduce((a, b) => a + b, 0) / 4; };
-    const best = k => Math.max(...W.map(x => x[k])), ds = (a, b) => a === b ? '' : a > b ? 'up' : 'dn';
-    const row = (n, k, f) => `<tr><td class="mut">${n}</td><td><b>${f(cur[k])}</b></td><td>${f(prv[k])}</td><td>${f(avg4(k))}</td><td>${f(best(k))}</td></tr>`;
-    const R = G.records, th = G.think;
-    h += `<section class="card">${lbl('Me vs me', G.rank ? `#${G.rank.rank} of ${G.rank.of} weeks` : '')}
-      <p class="sm mut">${G.rank ? `This week is your <b>#${G.rank.rank}</b> best of ${G.rank.of} weeks.` : 'Log focus this week to rank it against your past weeks.'} The only opponent is who you were.</p>
-      <table class="tbl xs"><tr class="mut"><td></td><td>This wk</td><td>Last wk</td><td>4-wk avg</td><td>Best</td></tr>
-        ${row('Focus', 'min', fm)}${row('Floor days', 'floor', v => Math.round(v * 10) / 10)}${row('Deep blocks', 'deep', v => Math.round(v * 10) / 10)}</table>
-      <div class="lbl2 mt8">Personal records</div>
-      <div class="sm">Longest sitting <b>${R.session ? fm(R.session.minutes) : '–'}</b> <span class="xs mut">${R.session ? esc(R.session.day) : ''}</span></div>
-      <div class="sm">Biggest day <b>${R.day ? fm(R.day.m) : '–'}</b> <span class="xs mut">${R.day ? esc(R.day.day) : ''}</span></div>
-      <div class="sm">Longest streak <b>${R.streak}</b> days · Fastest start <b>${fsec(R.fastest)}</b></div></section>`;
-    h += `<section class="card">${lbl('Think-to-do', th.n ? `${th.n} starts tracked` : '')}
-      <p class="sm mut">Seconds between opening the app and starting a block. Shorter means less thinking, more doing.</p>
-      <div class="grid3"><div class="stat"><b>${fsec(th.this)}</b><span class="xs mut">median this wk</span></div><div class="stat"><b>${fsec(th.last)}</b><span class="xs mut">last wk</span></div><div class="stat"><b>${fsec(th.fastest)}</b><span class="xs mut">fastest ever</span></div></div>
-      ${th.daily.some(x => x.med != null) ? `<div class="lbl2 mt8">Last 14 days</div>${bars(th.daily.map(x => x.med || 0), '#3dd6a0')}<div class="xs mut">Each bar is that day's median start time. Lower is better.</div>` : '<div class="xs mut mt8">Start a block after opening the app and your first number shows up here.</div>'}</section>`;
+    ${u.status && (u.status.text || u.status.emoji) ? `<div class="prof-status sm">${u.status.emoji ? `<span>${esc(u.status.emoji)}</span>` : ''}${u.status.text ? esc(u.status.text) : ''}</div>` : ''}
+    <div class="profile-actions">
+      <button class="btn-s" data-act="shareCard">${ic('share', 15)} Share</button>
+      <button class="btn-s" data-pact="editProfile" data-uid="${u.id}">${ic('edit', 15)} Edit</button>
+      <button class="btn-s" data-act="appearanceJump">${ic('palette', 15)} Style</button>
+    </div></section>`;
+  h += `<div class="float">${seg(MESECS, sec, 'meSec')}</div>`;
+
+  if (sec === 'overview') {
+    h += `<section class="card">${lbl('The Ragda meter')}<p class="sm mut">Your last 7 days against the old A+ you (${og.baseline_h}h a day).</p><div class="row between"><div class="bignum" style="color:${pct >= 100 ? 'var(--good)' : 'var(--tx)'}">${pct}%</div><div class="sm rt-text">${pct >= 130 ? 'You are Ragdamaxed. The old you cannot keep up.' : pct >= 100 ? 'You matched the A+ you. Now pass them.' : pct >= 60 ? 'Closing in. Keep stacking days.' : 'The gap is real. The gap is also closable.'}</div></div>
+      <div class="bar mt8 ${pct >= 100 ? 'g' : ''}"><i style="width:${Math.min(pct, 100)}%"></i></div>
+      ${I.ghost ? `<div class="lbl2">You vs your best week</div>${lines([{ v: I.ghost.cum, c: 'var(--mut)', d: 1, w: 2 }, { v: I.cum, c: 'var(--good)', w: 3 }])}<div class="xs mut">Dashed is your best week (${fm(I.ghost.total)}). Green is this week.</div>` : ''}</section>`;
+    h += `<section class="card">${lbl('Evidence locker')}<p class="sm mut">When your brain says "I'm a failure", read the court record.</p><div class="grid3"><div class="stat"><b>${e.hours}h</b><span class="xs mut">focused</span></div><div class="stat"><b>${e.days_hit}</b><span class="xs mut">floor days</span></div><div class="stat"><b>${e.longest}</b><span class="xs mut">best streak</span></div><div class="stat"><b>${e.deep}</b><span class="xs mut">deep blocks</span></div><div class="stat"><b>${e.urges_won}</b><span class="xs mut">urges beaten</span></div><div class="stat"><b>${e.learned}</b><span class="xs mut">chapters</span></div></div>
+      ${e.wins.length ? '<div class="lbl2">Your own wins</div>' + e.wins.map(w => `<div class="sm" style="padding:3px 0">${esc(w.win)} <span class="xs mut">${esc(w.day)}</span></div>`).join('') : ''}</section>`;
+    if (I.xp_log.length) h += `<section class="card">${lbl('Recent XP')}${I.xp_log.slice(0, 8).map(x => `<div class="row between sm" style="padding:4px 0"><span class="mut">${esc(x.label)}</span><b class="num">${x.amount > 0 ? '+' : ''}${x.amount}</b></div>`).join('')}</section>`;
+  }
+
+  if (sec === 'stats') {
+    const G = S.growth;
+    if (G) {
+      const W = G.weeks, cur = W[11], prv = W[10], avg4 = k => { const v = W.slice(6, 10).map(x => x[k]); return v.reduce((a, b) => a + b, 0) / 4; };
+      const best = k => Math.max(...W.map(x => x[k]));
+      const row = (n, k, f) => `<tr><td class="mut">${n}</td><td><b>${f(cur[k])}</b></td><td>${f(prv[k])}</td><td>${f(avg4(k))}</td><td>${f(best(k))}</td></tr>`;
+      const R = G.records, th = G.think;
+      h += `<section class="card">${lbl('Me vs me', G.rank ? `#${G.rank.rank} of ${G.rank.of} weeks` : '')}
+        <p class="sm mut">${G.rank ? `This week is your <b>#${G.rank.rank}</b> best of ${G.rank.of} weeks.` : 'Log focus this week to rank it against your past weeks.'} The only opponent is who you were.</p>
+        <table class="tbl xs"><tr class="mut"><td></td><td>This wk</td><td>Last wk</td><td>4-wk avg</td><td>Best</td></tr>
+          ${row('Focus', 'min', fm)}${row('Floor days', 'floor', v => Math.round(v * 10) / 10)}${row('Deep blocks', 'deep', v => Math.round(v * 10) / 10)}</table>
+        <div class="lbl2 mt8">Personal records</div>
+        <div class="sm">Longest sitting <b>${R.session ? fm(R.session.minutes) : '–'}</b> <span class="xs mut">${R.session ? esc(R.session.day) : ''}</span></div>
+        <div class="sm">Biggest day <b>${R.day ? fm(R.day.m) : '–'}</b> <span class="xs mut">${R.day ? esc(R.day.day) : ''}</span></div>
+        <div class="sm">Longest streak <b>${R.streak}</b> days · Fastest start <b>${fsec(R.fastest)}</b></div></section>`;
+      h += `<section class="card">${lbl('Think-to-do', th.n ? `${th.n} starts tracked` : '')}
+        <p class="sm mut">Seconds between opening the app and starting a block. Shorter means less thinking, more doing.</p>
+        <div class="grid3"><div class="stat"><b>${fsec(th.this)}</b><span class="xs mut">median this wk</span></div><div class="stat"><b>${fsec(th.last)}</b><span class="xs mut">last wk</span></div><div class="stat"><b>${fsec(th.fastest)}</b><span class="xs mut">fastest ever</span></div></div>
+        ${th.daily.some(x => x.med != null) ? `<div class="lbl2 mt8">Last 14 days</div>${bars(th.daily.map(x => x.med || 0), '#3dd6a0')}<div class="xs mut">Each bar is that day's median start time. Lower is better.</div>` : '<div class="xs mut mt8">Start a block after opening the app and your first number shows up here.</div>'}</section>`;
+    }
+    h += `<section class="card">${lbl('Last 12 weeks')}<div class="heat">${hm}</div><div class="xs mut mt8">Brighter means more focus. Blue means a streak freeze saved you.</div></section>`;
+    h += `<section class="card">${lbl('Weekly hours')}${bars(I.weeks.map(w => w.m), 'var(--acc3)')}<div class="row between xs mut"><span>8 weeks ago</span><span>this week ${fm(I.weeks[7].m)}</span></div></section>`;
+    if (I.hours.some(x => x)) h += `<section class="card">${lbl('Your best focus hours')}<div class="hrs">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut mt4"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm mt8">Peak: <b>${peakHour % 12 || 12}${peakHour < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></section>`;
+    if (Object.keys(I.sub7).length) { const tot = Object.values(I.sub7).reduce((a, b) => a + b, 0); h += `<section class="card">${lbl('Subject balance', '7 days')}${Object.entries(I.sub7).sort((a, b) => b[1] - a[1]).map(([s, m]) => `<div class="row g8" style="margin:8px 0"><span class="sm w78">${esc(s)}</span><div class="bar grow"><i style="width:${m / tot * 100}%;background:${SCOL[s] || '#9a9aa8'}"></i></div><span class="xs mut w56 r">${fm(m)}</span></div>`).join('')}</section>`; }
+    if (I.urge_triggers.length) h += `<section class="card">${lbl('Your triggers')}<div class="chips">${I.urge_triggers.map(t => `<span class="pill">${esc(t.trigger)} ×${t.n}</span>`).join('')}</div></section>`;
+  }
+
+  if (sec === 'collection') {
+    h += `<section class="card">${lbl('Locker')}<div class="sm mut">Avatars and frames live in the shop. Spending XP never lowers your level or rank.</div><button class="btn-xl mt12" data-act="openShop">Open the shop</button></section>`;
+    h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge r-${b.rarity} ${b.got ? '' : 'off'}"><s><i>${esc(b.emoji)}</i></s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div><div class="rar">${esc(b.rname)} · +${b.xp} XP · held by ${b.holders}/${b.total}</div></div>`).join('')}</div></section>`;
+    h += `<section class="card">${lbl('Titles')}<details data-k="ladder"><summary>Title ladder · ${I.ladder.length} titles · ${L.next_rank ? 'next: ' + esc(L.next_rank) + ' at Lv ' + L.next_at : 'top title reached'}</summary>${I.ladder.map(r => `<div class="q" style="opacity:${L.level >= r.level ? 1 : .4}"><span class="lad-e">${emblem(r.rank, 26)}</span><div class="grow ${L.rank === r.rank ? 'b' : ''}">${esc(r.rank)}${L.rank === r.rank ? ' <span class="pill">you</span>' : ''}</div><span class="xs mut">Lv ${r.level} · ${(r.xp || 0).toLocaleString()} XP</span></div>`).join('')}</details></section>`;
+  }
+
+  if (sec === 'settings') {
+    if (u.admin) h += `<section class="card">${lbl('Server')}<p class="sm mut">You run this crew. Live stats, PIN resets, moderation, backups.</p><button class="btn-xl" data-act="admin">Open server dashboard</button></section>`;
+    h += `<section class="card thp-card">${lbl('App appearance', '<span class="pill">Live</span>')}<p class="sm mut" style="margin-top:0">Make the app yours: dark or light, six curated palettes, five accent roles, a surface style, and your own wallpaper. The crew chat follows this theme until you give it its own look in a channel.</p>${typeof Theme !== 'undefined' ? Theme.panelHTML('app') : ''}</section>`;
+    h += `<section class="card">${lbl('Settings')}<label>Display name</label><input id="s_name" value="${esc(u.display)}" maxlength="20"><label>Identity: "I am becoming someone who…"</label><input id="s_id" value="${esc(u.identity)}" placeholder="shows up before he feels like it" maxlength="140">
+      <div class="grid2"><div><label>Old A+ you studied (hrs/day)</label><input id="s_base" type="number" step="0.5" value="${u.baseline_h}"></div><div><label>Daily floor (min)</label><input id="s_floor" type="number" value="${u.daily_min}"></div></div>
+      <label>Exams (name and date)</label>${[0, 1, 2].map(i => { const x = u.exams[i] || {}; return `<div class="row g8" style="margin-bottom:6px"><input id="s_en${i}" placeholder="JEE Main" value="${esc(x.name || '')}"><input id="s_ed${i}" type="date" value="${esc(x.date || '')}" style="width:156px"></div>`; }).join('')}
+      <label>Avatar and colour</label><div class="row g8"><button data-act="openShop" class="grow">Change avatar or frame</button><input id="s_col" type="color" value="${esc(u.color)}" style="width:72px;padding:3px"></div>
+      <label class="row g8" style="margin-top:14px"><input id="s_fx" type="checkbox" ${fxOn() ? 'checked' : ''}> <span class="sm tx">Sound and haptics</span></label><button class="btn-p btn-xl mt12" data-act="saveSettings">Save</button><button class="btn-xl mt8" data-act="notif">Enable alerts when friends start a block</button><button class="btn-d btn-xl mt8" data-act="logout">Log out</button></section>`;
   }
   h += `<section class="card">${lbl('Last 12 weeks')}<div class="heat">${hm}</div><div class="xs mut mt8">Brighter means more focus. Blue means a streak freeze saved you.</div></section>`;
   h += `<section class="card">${lbl('Weekly hours')}${bars(I.weeks.map(w => w.m), '#7c6af7')}<div class="row between xs mut"><span>8 weeks ago</span><span>this week ${fm(I.weeks[7].m)}</span></div></section>`;
@@ -1134,6 +1250,7 @@ const A = {
   async logAndExitFocus() { if (S.today?.pomo && !(await confirmSheet('End the pomodoro plan and log this block?', 'End and log'))) return; try { await finishTimer(); } catch (e) { } },
 };
 Object.assign(A, {
+  appearanceJump() { S.meSec = 'settings'; render(); setTimeout(() => { const el = document.querySelector('.thp-card'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50); },
   lockTab(el) { S.lockTab = el.dataset.v; render(); },
   async buyItem(el) {
     const it = S.shop && S.shop.items.find(x => x.id === el.dataset.id); if (!it) return;
@@ -1250,6 +1367,7 @@ async function chatLoadThreads() {
 function chatStop() { CH.run++; if (CH.ctl) { try { CH.ctl.abort(); } catch (e) { } CH.ctl = null; } }
 function chatReset() { chatStop(); Object.assign(CH, { threads: [], people: {}, open: null, msgs: [], more: false, seq: -1, unread: {}, total: 0, notified: 0, painted: null }); }
 function chatBadge() {
+  if (window.Chat && Chat.badge) return Chat.badge();
   const b = document.querySelector('.nav button[data-v="chat"]'); if (!b) return;
   let i = b.querySelector('.nb');
   if (CH.total) { if (!i) { i = document.createElement('i'); i.className = 'nb'; b.appendChild(i); } i.textContent = CH.total > 9 ? '9+' : CH.total; } else if (i) i.remove();
@@ -1269,7 +1387,7 @@ function vChat() {
 function vThreads() {
   const row = t => {
     const l = t.last, who = l ? (l.uid === S.user.id ? 'You: ' : t.kind === 'crew' ? esc((CH.people[l.uid] || {}).display || '') + ': ' : '') : '';
-    const av = t.kind === 'crew' ? '<div class="av" style="background:#7c5cff33;border:2px solid #7c5cff">#</div>' : avatar(t.emoji, t.color, '', null, CH.people[t.uid]);
+    const av = t.kind === 'crew' ? '<div class="av" style="background:var(--accbg);border:2px solid var(--acc);color:var(--acc2)">#</div>' : avatar(t.emoji, t.color, '', null, CH.people[t.uid]);
     return `<div class="q thread" data-act="chatOpen" data-v="${esc(t.key)}">${av}<div class="grow" style="min-width:0"><div class="row between"><b>${esc(t.title)}</b><span class="xs mut">${l ? ago(l.ts) : ''}</span></div>
       <div class="xs mut ell">${l ? who + esc(l.text) : 'No messages yet'}</div></div>${t.unread ? `<span class="ub">${t.unread}</span>` : ''}</div>`;
   };
@@ -1365,7 +1483,7 @@ function chatApply(r) {
   if (changed) chatPaint(stick);
   const theirs = fresh.filter(m => m.uid !== S.user.id);
   if (theirs.length && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-    const m = theirs[theirs.length - 1]; new Notification(`💬 ${(CH.people[m.uid] || {}).display || 'New message'}`, { body: m.text.slice(0, 80) });
+    const m = theirs[theirs.length - 1]; new Notification(`New message · ${(CH.people[m.uid] || {}).display || 'Member'}`, { body: m.text.slice(0, 80) });
   }
   chatBadge();
 }
@@ -1406,8 +1524,8 @@ function chatFmt(t) {
 function chatCtx() {
   const el = $('#chat_ctx'); if (!el) return;
   const who = id => (CH.people[id] || { display: 'Member' }).display;
-  el.innerHTML = CH.edit ? '<div class="ctx"><span class="ell">✏️ Editing your message</span><button class="btn-s" data-act="chatCancel">✕</button></div>'
-    : CH.reply ? `<div class="ctx"><span class="ell">↩ Replying to <b>${esc(who(CH.reply.uid))}</b>: ${esc(CH.reply.text)}</span><button class="btn-s" data-act="chatCancel">✕</button></div>` : '';
+  el.innerHTML = CH.edit ? `<div class="ctx">${ic('edit',14)}<span class="ell">Editing your message</span><button class="btn-s ico" data-act="chatCancel" aria-label="Cancel edit">${ic('x',13)}</button></div>`
+    : CH.reply ? `<div class="ctx">${ic('reply',14)}<span class="ell">Replying to <b>${esc(who(CH.reply.uid))}</b>: ${esc(CH.reply.text)}</span><button class="btn-s ico" data-act="chatCancel" aria-label="Cancel reply">${ic('x',13)}</button></div>` : '';
 }
 async function chatSend() {
   const ta = $('#chat_in'); if (!ta || chatSending) return;
@@ -1485,7 +1603,7 @@ async function chatUnreadTick() {
     const res = await fetch('/api/chat/unread'); if (!res.ok) return;
     const r = await res.json(); CH.total = r.total; CH.unread = r.unread; chatBadge();
     if (r.latest && r.latest.id > CH.notified) {
-      if (CH.notified && 'Notification' in window && Notification.permission === 'granted') new Notification(`💬 ${r.latest.from}`, { body: r.latest.text });
+      if (CH.notified && 'Notification' in window && Notification.permission === 'granted') new Notification(`New message · ${r.latest.from}`, { body: r.latest.text });
       CH.notified = r.latest.id;
     }
     if (S.tab === 'chat' && !CH.open) { await chatLoadThreads(); render(); }

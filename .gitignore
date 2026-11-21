@@ -10,5 +10,6 @@ __pycache__/
 .env
 # laptop-only helper scripts (hard-coded /home/nox paths)
 check.sh
+!scripts/check.sh
 deploy_local.sh
 funnel_on.sh

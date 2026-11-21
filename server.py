@@ -7,7 +7,6 @@ Run:  python3 server.py        (then open http://localhost:8765)
 """
 import csv
 import datetime as dt
-import email.utils
 import gzip
 import hashlib
 import json
@@ -52,9 +51,7 @@ DB_PATH = env("DB") or (_DB_OLD if os.path.exists(_DB_OLD) and not os.path.exist
 PORT = int(os.environ.get("PORT", "8765"))
 WEBHOOK = env("DISCORD_WEBHOOK")
 BIND = env("BIND", "0.0.0.0")  # set 127.0.0.1 behind a tunnel/reverse proxy
-ADMINS = {n.strip().lower() for n in env("ADMINS").split(",") if n.strip()}  # usernames that get the Server dashboard
-# Fallback: vulgnox is always admin (owner), even if env not set
-ADMINS.add("vulgnox")
+ADMINS = {n.strip().lower() for n in env("ADMINS").split(",") if n.strip()}  # usernames that get the Server dashboard (env only, B-09)
 LEGACY_CSV = env("LEGACY_CSV", os.path.join(ROOT, "..", "growth_tracker", "form_data", "growth_data.csv"))
 ROLLOVER_HOUR = 3  # a "day" ends at 3 AM, so late-night study still counts for the day you started
 SUBJECTS = ["Physics", "Chemistry", "Maths", "English", "Other"]
@@ -97,6 +94,24 @@ def grind(conn, uid, d1=None, d2=None):
         sql += " AND day<?"
         a.append(d2)
     return conn.execute(sql, a).fetchone()[0]
+
+
+def grind_map(conn, ids, d1=None, d2=None):
+    """grind() for many users in one query (P-05). Missing users default to 0."""
+    out = {uid: 0 for uid in ids}
+    if not ids:
+        return out
+    ph = ",".join("?" * len(ids))
+    sql, a = f"SELECT user_id, COALESCE(SUM(amount),0) x FROM xp WHERE user_id IN ({ph}) AND {GRIND_SQL}", list(ids)
+    if d1:
+        sql += " AND day>=?"
+        a.append(d1)
+    if d2:
+        sql += " AND day<?"
+        a.append(d2)
+    for r in conn.execute(sql + " GROUP BY user_id", a).fetchall():
+        out[r["user_id"]] = r["x"]
+    return out
 
 # (level, title, emoji). Calibrated to the XP curve: the top title needs the ~16h/day ceiling, realistic apex is Phantom (~10h/day).
 RANKS = [(1, "Sleepwalker", "😴"), (5, "Spark", "✨"), (12, "Grinder", "⚙️"), (20, "Locked In", "🔒"),
@@ -163,6 +178,9 @@ CREATE TABLE IF NOT EXISTS tests(id INTEGER PRIMARY KEY, user_id INTEGER, day TE
  score REAL, maxscore REAL, concept INTEGER DEFAULT 0, silly INTEGER DEFAULT 0, timeerr INTEGER DEFAULT 0, note TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS urges(id INTEGER PRIMARY KEY, user_id INTEGER, ts TEXT, hour INTEGER, trigger TEXT, outcome TEXT);
 CREATE TABLE IF NOT EXISTS feed(id INTEGER PRIMARY KEY, crew_id INTEGER, user_id INTEGER, ts TEXT, kind TEXT, text TEXT);
+CREATE INDEX IF NOT EXISTS ix_feed_crew ON feed(crew_id, id);
+CREATE INDEX IF NOT EXISTS ix_focus_kind ON focus(user_id, kind, day);
+CREATE INDEX IF NOT EXISTS ix_xp_user_day ON xp(user_id, day);
 CREATE TABLE IF NOT EXISTS reactions(feed_id INTEGER, user_id INTEGER, emoji TEXT, PRIMARY KEY(feed_id, user_id));
 CREATE TABLE IF NOT EXISTS nudges(id INTEGER PRIMARY KEY, from_id INTEGER, to_id INTEGER, day TEXT, UNIQUE(from_id, to_id, day));
 CREATE TABLE IF NOT EXISTS duels(id INTEGER PRIMARY KEY, crew_id INTEGER, a INTEGER, b INTEGER, days INTEGER, start TEXT, end TEXT, status TEXT, winner INTEGER);
@@ -190,17 +208,9 @@ CREATE TABLE IF NOT EXISTS pomo(user_id INTEGER PRIMARY KEY, subject TEXT, total
 def connect():
     conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
-    # Keep reads fast under concurrent chat traffic. WAL is shared by every
-    # connection; the rest are per-connection knobs, so this stays cheap.
-    conn.execute("PRAGMA journal_mode=WAL")
+    # WAL is persistent and set once in bootstrap(); per-connection pragmas only (P-08).
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=15000")
-    conn.execute("PRAGMA temp_store=MEMORY")
-    conn.execute("PRAGMA cache_size=-20000")
-    try:
-        conn.execute("PRAGMA mmap_size=134217728")
-    except sqlite3.DatabaseError:
-        pass
     return conn
 
 
@@ -501,13 +511,18 @@ def settle(conn, uid):
     return q1(conn, "SELECT * FROM users WHERE id=?", (uid,))
 
 
-def streak_view(conn, u):
-    t = today()
-    st = day_stats(conn, u["id"], t, t).get(iso(t)) or {"total": 0, "timer": 0, "sub": {}}
+def streak_from(u, st):
+    """streak_view without the per-user query, so callers that already batched today's stats can reuse it."""
     ok = qualifies(st, u["daily_min"])
     now_ = u["run"] + (1 if ok else 0)
     return {"now": now_, "run": u["run"], "longest": max(u["longest"], now_), "freezes": u["freezes"],
-            "qualified": ok, "at_risk": u["run"] > 0 and not ok}, st
+            "qualified": ok, "at_risk": u["run"] > 0 and not ok}
+
+
+def streak_view(conn, u):
+    t = today()
+    st = day_stats(conn, u["id"], t, t).get(iso(t)) or {"total": 0, "timer": 0, "sub": {}}
+    return streak_from(u, st), st
 
 
 # ----------------------------------------------------------------------------- quests, badges, stats
@@ -693,11 +708,13 @@ def check_badges(c):
     have = {r["id"] for r in q(c.conn, "SELECT id FROM badges WHERE user_id=?", (u["id"],))}
 
     def grant(bid, emoji, name, desc, rar):
-        c.conn.execute("INSERT OR IGNORE INTO badges(user_id,id,day) VALUES(?,?,?)", (u["id"], bid, iso(today())))
+        cur = c.conn.execute("INSERT OR IGNORE INTO badges(user_id,id,day) VALUES(?,?,?)", (u["id"], bid, iso(today())))
         have.add(bid)
-        if award(c, f"badge:{bid}", RARITY[rar][1], f"Badge: {name}") or True:
-            c.ev.append({"t": "badge", "emoji": emoji, "name": name, "desc": desc, "xp": RARITY[rar][1], "rarity": RARITY[rar][0]})
-            feed(c, "badge", f"earned {emoji} {name} ({RARITY[rar][0]})")
+        if not cur.rowcount:
+            return  # already held: never re-announce or re-pay a badge (B-03)
+        award(c, f"badge:{bid}", RARITY[rar][1], f"Badge: {name}")
+        c.ev.append({"t": "badge", "emoji": emoji, "name": name, "desc": desc, "xp": RARITY[rar][1], "rarity": RARITY[rar][0]})
+        feed(c, "badge", f"earned {emoji} {name} ({RARITY[rar][0]})")
 
     for bid, emoji, name, desc, rar, fn, secret in BADGES:
         if fn and bid not in have and fn(s):
@@ -748,6 +765,22 @@ def evaluate(c):
         resolve_duels(c)
         rank_check(c)
         season_settle(c)
+
+
+EVAL_AT = {}   # (user_id, day) -> monotonic time of the last full evaluate()
+EVAL_TTL = float(env("EVAL_TTL", "60"))   # seconds between full passes on reads (0 disables the cache, used by tests)
+
+
+def evaluate_light(c):
+    """P-06: a read must not run the whole settle/quests/badges pass on every poll.
+    Once a minute per user is plenty; state-changing POSTs still run evaluate() themselves."""
+    key = (c.user["id"], iso(today()))
+    if time.monotonic() - EVAL_AT.get(key, 0) < EVAL_TTL:
+        return
+    evaluate(c)
+    EVAL_AT[key] = time.monotonic()
+    if len(EVAL_AT) > 5000:
+        EVAL_AT.clear()
 
 
 def rank_check(c):
@@ -988,14 +1021,11 @@ def api_ping(c):
     return {"ok": True}
 
 
-@route("GET", "/api/me")
+@route("GET", "/api/me", auth=False)
 def api_me(c):
-    user = public_user(c.user)
-    soc = social_profiles.social_card(c.conn, c.user["id"], c.user["id"])
-    user["pimg"] = soc["avatar"]
-    if soc["status"]:
-        user["status"] = soc["status"]
-    return {"user": user, "level": level_info(total_xp(c.conn, c.user["id"])),
+    if not c.user:
+        return {"user": None}   # B-12: a logged-out boot is not an error
+    return {"user": public_user(c.user), "level": level_info(total_xp(c.conn, c.user["id"])),
             "habit_defs": [{"id": h[0], "name": h[1], "emoji": h[2], "xp": h[3]} for h in HABITS], "subjects": SUBJECTS}
 
 
@@ -1041,7 +1071,7 @@ def api_settings(c):
 @route("GET", "/api/today")
 def api_today(c):
     pomo_advance(c)
-    evaluate(c)
+    evaluate_light(c)
     u = c.user
     uid = u["id"]
     t = today()
@@ -1084,34 +1114,29 @@ def api_today(c):
     if u["crew_id"]:
         crew = q1(c.conn, "SELECT * FROM crews WHERE id=?", (u["crew_id"],))
         if crew:
-            mem = q(c.conn, "SELECT id FROM users WHERE crew_id=?", (crew["id"],))
+            mem = q(c.conn, "SELECT id, display, emoji FROM users WHERE crew_id=?", (crew["id"],))
             if len(mem) >= 2:
                 ws = wstart(t)
-                # Get week XP for all members
-                week_xp = {}
-                for m in mem:
-                    week_xp[m["id"]] = grind(c.conn, m["id"], iso(ws))
-                sorted_mem = sorted(mem, key=lambda m: week_xp[m["id"]], reverse=True)
+                week_xp = grind_map(c.conn, [m["id"] for m in mem], iso(ws))
+                sorted_mem = sorted(mem, key=lambda m: week_xp.get(m["id"], 0), reverse=True)
                 me_i = next(i for i, m in enumerate(sorted_mem) if m["id"] == uid)
-                nm = lambda i: q1(c.conn, "SELECT display, emoji FROM users WHERE id=?", (sorted_mem[i]["id"],))
-                up = nm(me_i - 1) if me_i > 0 else None
-                dn = nm(me_i + 1) if me_i + 1 < len(sorted_mem) else None
+                up = sorted_mem[me_i - 1] if me_i > 0 else None
+                dn = sorted_mem[me_i + 1] if me_i + 1 < len(sorted_mem) else None
                 standing = {"rank": me_i + 1, "of": len(sorted_mem), "xp": week_xp[uid],
                             "up": {"name": up["display"], "gap": week_xp[sorted_mem[me_i - 1]["id"]] - week_xp[uid]} if up else None,
                             "down": {"name": dn["display"], "gap": week_xp[uid] - week_xp[sorted_mem[me_i + 1]["id"]]} if dn else None}
                 if me_i > 0:
-                    rival = q1(c.conn, "SELECT display, emoji FROM users WHERE id=?", (sorted_mem[me_i - 1]["id"],))
-                    rival_info = {"name": rival["display"], "emoji": rival["emoji"], "gap": week_xp[sorted_mem[me_i - 1]["id"]] - week_xp[uid]}
+                    rival_info = {"name": up["display"], "emoji": up["emoji"], "gap": week_xp[sorted_mem[me_i - 1]["id"]] - week_xp[uid]}
                 elif len(sorted_mem) > 1:
-                    rival = q1(c.conn, "SELECT display, emoji FROM users WHERE id=?", (sorted_mem[1]["id"],))
-                    rival_info = {"name": rival["display"], "emoji": rival["emoji"], "gap": week_xp[uid] - week_xp[sorted_mem[1]["id"]], "dir": "behind"}
+                    rival_info = {"name": dn["display"], "emoji": dn["emoji"], "gap": week_xp[uid] - week_xp[dn["id"]], "dir": "behind"}
                 
                 # Boss battle status
                 boss = q1(c.conn, "SELECT * FROM boss_battles WHERE crew_id=? AND day=?", (crew["id"], ts))
                 if boss:
                     boss_info = {"passed": bool(boss["passed"]), "target": boss["target_min"], "actual": boss["actual_min"]}
                 else:
-                    today_timer = sum(c.conn.execute("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day=? AND kind='timer'", (m["id"], ts)).fetchone()[0] for m in mem)
+                    mem_ids = [m["id"] for m in mem]
+                    today_timer = c.conn.execute(f"SELECT COALESCE(SUM(minutes),0) FROM focus WHERE day=? AND kind='timer' AND user_id IN ({','.join('?' * len(mem_ids))})", (ts, *mem_ids)).fetchone()[0]
                     boss_info = {"passed": None, "target": boss_target(c.conn, crew["id"], t), "actual": today_timer}
     
     return {
@@ -1607,28 +1632,43 @@ def api_crew(c):
     t = today()
     ts = iso(t)
     ws = wstart(t)
+    # P-05: one batched query per stat instead of ~15 per member.
+    mem = q(c.conn, "SELECT * FROM users WHERE crew_id=?", (crew["id"],))
+    ids = [m["id"] for m in mem]
+    ph = ",".join("?" * len(ids))
+    mstart = iso(t.replace(day=1))
+    week_xp = grind_map(c.conn, ids, iso(ws))
+    last_xp = grind_map(c.conn, ids, iso(ws - D(7)), iso(ws))
+    month_xp = grind_map(c.conn, ids, mstart)
+    all_xp = grind_map(c.conn, ids)
+    total = {r["user_id"]: r["x"] for r in q(c.conn, f"SELECT user_id, COALESCE(SUM(amount),0) x FROM xp WHERE user_id IN ({ph}) GROUP BY user_id", tuple(ids))}
+    fm = {r["user_id"]: r for r in q(c.conn, f"""SELECT user_id,
+        COALESCE(SUM(CASE WHEN day>=? THEN minutes END),0) week_min,
+        COALESCE(SUM(CASE WHEN day>=? THEN minutes END),0) month_min,
+        COALESCE(SUM(minutes),0) all_min,
+        COALESCE(MAX(CASE WHEN kind='timer' THEN minutes END),0) best_session,
+        COALESCE(SUM(CASE WHEN kind='timer' AND minutes>=50 THEN 1 ELSE 0 END),0) deep
+        FROM focus WHERE user_id IN ({ph}) GROUP BY user_id""", (iso(ws), mstart, *ids))}
+    best_day = {r["user_id"]: r["best_day"] for r in q(c.conn, f"SELECT user_id, MAX(s) best_day FROM (SELECT user_id, day, SUM(minutes) s FROM focus WHERE user_id IN ({ph}) GROUP BY user_id, day) GROUP BY user_id", tuple(ids))}
+    today_f = {r["user_id"]: r for r in q(c.conn, f"SELECT user_id, COALESCE(SUM(minutes),0) total, COALESCE(SUM(CASE WHEN kind='timer' THEN minutes ELSE 0 END),0) timer FROM focus WHERE day=? AND user_id IN ({ph}) GROUP BY user_id", (ts, *ids))}
+    live_now = {r["user_id"]: r for r in q(c.conn, f"SELECT user_id, subject, started, mode FROM timers WHERE user_id IN ({ph})", tuple(ids))}
     out = []
-    for m in q(c.conn, "SELECT id FROM users WHERE crew_id=?", (crew["id"],)):
-        mu = settle(c.conn, m["id"])
-        sv, st = streak_view(c.conn, mu)
-        wk = grind(c.conn, mu["id"], iso(ws))
-        wm = c.conn.execute("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day>=?", (mu["id"], iso(ws))).fetchone()[0]
-        lw = grind(c.conn, mu["id"], iso(ws - D(7)), iso(ws))
-        tx = total_xp(c.conn, mu["id"])
-        mstart = iso(t.replace(day=1))
-        one = lambda sql, *a: c.conn.execute(sql, (mu["id"],) + a).fetchone()[0]
-        extra = {"month_xp": grind(c.conn, mu["id"], mstart),
-                 "month_min": one("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=? AND day>=?", mstart),
-                 "all_xp": grind(c.conn, mu["id"]), "all_min": one("SELECT COALESCE(SUM(minutes),0) FROM focus WHERE user_id=?"),
-                 "best_session": one("SELECT COALESCE(MAX(minutes),0) FROM focus WHERE user_id=? AND kind='timer'"),
-                 "best_day": one("SELECT COALESCE(MAX(s),0) FROM (SELECT SUM(minutes) s FROM focus WHERE user_id=? GROUP BY day)"),
-                 "deep": one("SELECT COUNT(*) FROM focus WHERE user_id=? AND kind='timer' AND minutes>=50"),
-                 "longest": mu["longest"]}
-        live = q1(c.conn, "SELECT subject, started, mode FROM timers WHERE user_id=?", (mu["id"],))
+    for mu in mem:
+        if not mu["last_settled"] or mu["last_settled"] < iso(t - D(1)):
+            mu = settle(c.conn, mu["id"])
+        st = today_f.get(mu["id"]) or {"total": 0, "timer": 0}
+        sv = streak_from(mu, st)
+        f = fm.get(mu["id"]) or {}
+        live = live_now.get(mu["id"])
         out.append({"id": mu["id"], "display": mu["display"], "emoji": mu["emoji"], "color": mu["color"], "me": mu["id"] == u["id"],
                     "av": mu["av"] or "", "fr": mu["fr"] or "",
-                    "identity": mu["identity"], "week_xp": wk, "last_week_xp": lw, "week_min": wm, "today_min": st["total"],
-                    "streak": sv["now"], "qualified": sv["qualified"], "level": level_info(tx), **extra,
+                    "identity": mu["identity"], "week_xp": week_xp.get(mu["id"], 0), "last_week_xp": last_xp.get(mu["id"], 0),
+                    "week_min": f.get("week_min", 0), "today_min": st["total"],
+                    "streak": sv["now"], "qualified": sv["qualified"], "level": level_info(total.get(mu["id"], 0)),
+                    "month_xp": month_xp.get(mu["id"], 0), "month_min": f.get("month_min", 0),
+                    "all_xp": all_xp.get(mu["id"], 0), "all_min": f.get("all_min", 0),
+                    "best_session": f.get("best_session", 0), "best_day": best_day.get(mu["id"], 0), "deep": f.get("deep", 0),
+                    "longest": mu["longest"],
                     "live": {"subject": live["subject"], "elapsed": int(time.time() - live["started"]), "mode": live["mode"] or "timer"} if live else None})
     out.sort(key=lambda x: -x["week_xp"])
     for i, m in enumerate(out):
@@ -1683,11 +1723,17 @@ def api_crew(c):
     
     fd = q(c.conn, """SELECT f.id, f.ts, f.kind, f.text, us.display, us.emoji, us.color, us.av, us.fr, f.user_id FROM feed f JOIN users us ON us.id=f.user_id
         WHERE f.crew_id=? ORDER BY f.id DESC LIMIT 40""", (crew["id"],))
+    fids = [f["id"] for f in fd]
+    rmap, mmap = {}, {}
+    if fids:
+        phf = ",".join("?" * len(fids))
+        for r in q(c.conn, f"SELECT feed_id, emoji, COUNT(*) n FROM reactions WHERE feed_id IN ({phf}) GROUP BY feed_id, emoji", tuple(fids)):
+            rmap.setdefault(r["feed_id"], {})[r["emoji"]] = r["n"]
+        for r in q(c.conn, f"SELECT feed_id, emoji FROM reactions WHERE user_id=? AND feed_id IN ({phf})", (u["id"], *fids)):
+            mmap[r["feed_id"]] = r["emoji"]
     for f in fd:
-        rs = q(c.conn, "SELECT emoji, COUNT(*) n FROM reactions WHERE feed_id=? GROUP BY emoji", (f["id"],))
-        f["reactions"] = {r["emoji"]: r["n"] for r in rs}
-        mine = q1(c.conn, "SELECT emoji FROM reactions WHERE feed_id=? AND user_id=?", (f["id"], u["id"]))
-        f["mine"] = mine["emoji"] if mine else None
+        f["reactions"] = rmap.get(f["id"], {})
+        f["mine"] = mmap.get(f["id"])
     duels = q(c.conn, """SELECT d.*, ua.display an, ub.display bn FROM duels d JOIN users ua ON ua.id=d.a JOIN users ub ON ub.id=d.b
         WHERE d.crew_id=? AND d.status IN ('pending','active') ORDER BY d.id DESC""", (crew["id"],))
     for d in duels:
@@ -3078,13 +3124,37 @@ def notifs_seen(c):
 
 
 # ----------------------------------------------------------------------------- http
-STATIC_CACHE = {}
-STATIC_CACHE_LOCK = threading.Lock()
-STATIC_CACHE_MAX = 128
+STATIC_CACHE = {}  # fp -> (mtime, (raw, gz, etag, gz_etag))
+
+
+def asset_ver(name):
+    try:
+        with open(os.path.join(STATIC, name), "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:8]
+    except OSError:
+        return "0"
+
+
+def cached_static(fp):
+    st = os.stat(fp)
+    hit = STATIC_CACHE.get(fp)
+    if hit and hit[0] == st.st_mtime:
+        return hit[1]
+    with open(fp, "rb") as f:
+        raw = f.read()
+    if fp.endswith(os.sep + "index.html"):
+        # P-02: hashed asset URLs let the browser cache app.js/app.css for a year.
+        raw = raw.decode("utf-8").replace('href="/app.css"', f'href="/app.css?v={asset_ver("app.css")}"').replace(
+            'src="/app.js"', f'src="/app.js?v={asset_ver("app.js")}"').encode()
+    gz = gzip.compress(raw, 6) if len(raw) > 1024 else None
+    ent = (raw, gz, '"' + hashlib.sha1(raw).hexdigest()[:20] + '"', '"' + hashlib.sha1(gz or raw).hexdigest()[:20] + '"')
+    STATIC_CACHE[fp] = (st.st_mtime, ent)
+    return ent
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "Ragdamaxing/4"
+    protocol_version = "HTTP/1.1"   # P-01: keep-alive. Every response path below sends Content-Length.
     timeout = 30
 
     def log_message(self, *a):
@@ -3098,9 +3168,10 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def send_json(self, code, obj, cookie=None):
-        raw = json.dumps(obj, default=str).encode()
-        gz = len(raw) >= 1024 and "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
-        data = gzip.compress(raw, 5) if gz else raw
+        data = json.dumps(obj, default=str).encode()
+        gz = len(data) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or "")   # P-04
+        if gz:
+            data = gzip.compress(data, 5)
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -3129,165 +3200,39 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def send_media(self, path, name, ctype, inline=True, cache=None, etag=None):
-        """Stream an authenticated upload with validators and byte ranges.
-
-        Upload ids are immutable, so a strong ETag lets a returning browser
-        skip the body entirely. Ranges keep audio/video and large attachments
-        from being read into memory just to send the first chunk.
-        """
-        try:
-            st = os.stat(path)
-        except OSError:
-            raise ApiError("No such file", 404)
-        size = st.st_size
-        if not etag:
-            etag = '"%x-%x"' % (st.st_mtime_ns, size)
-        lastmod = email.utils.formatdate(st.st_mtime, usegmt=True)
-        cache = cache or ("private, max-age=604800" if inline else "private, max-age=3600")
-
-        inm = (self.headers.get("If-None-Match") or "").strip()
-        if inm:
-            tags = [t.strip().lstrip("W/") for t in inm.split(",")]
-            fresh = inm == "*" or etag in tags
-        else:
-            fresh = False
-        if not fresh:
-            ims = (self.headers.get("If-Modified-Since") or "").strip()
-            if ims:
-                try:
-                    when = email.utils.parsedate_to_datetime(ims).timestamp()
-                    fresh = int(st.st_mtime) <= int(when)
-                except (TypeError, ValueError, OverflowError):
-                    pass
-        if fresh:
-            self.send_response(304)
-            self.send_header("ETag", etag)
-            self.send_header("Last-Modified", lastmod)
-            self.send_header("Cache-Control", cache)
-            self.send_header("Accept-Ranges", "bytes")
-            self.end_headers()
-            return
-
-        start, end, status = 0, size - 1, 200
-        rng = (self.headers.get("Range") or "").strip()
-        if rng:
-            m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng)
-            if not m or "," in rng or (not m.group(1) and not m.group(2)):
-                self.send_response(416)
-                self.send_header("Content-Range", "bytes */%d" % size)
-                self.send_header("Accept-Ranges", "bytes")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            if not m.group(1):
-                suffix = int(m.group(2))
-                if suffix <= 0:
-                    start, end = size, size - 1
-                else:
-                    start = max(0, size - suffix)
-            else:
-                start = int(m.group(1))
-                end = int(m.group(2)) if m.group(2) else size - 1
-            if start >= size or end < start:
-                self.send_response(416)
-                self.send_header("Content-Range", "bytes */%d" % size)
-                self.send_header("Accept-Ranges", "bytes")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            end = min(end, size - 1)
-            status = 206
-        length = max(0, end - start + 1)
-        self.send_response(status)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Disposition",
-                         "%s; filename*=UTF-8''%s" % ("inline" if inline else "attachment", quote(name, safe="")))
-        self.send_header("Content-Length", str(length))
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("ETag", etag)
-        self.send_header("Last-Modified", lastmod)
-        self.send_header("Cache-Control", cache)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "sandbox")
-        if status == 206:
-            self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
-        self.end_headers()
-        try:
-            with open(path, "rb") as f:
-                f.seek(start)
-                left = length
-                while left > 0:
-                    chunk = f.read(min(64 * 1024, left))
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    left -= len(chunk)
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
-            pass
-
     def static(self, path, query=""):
         if path in ("/", ""):
             path = "/index.html"
         fp = os.path.normpath(os.path.join(STATIC, path.lstrip("/")))
-        if not (fp == STATIC or fp.startswith(STATIC + os.sep)) or not os.path.isfile(fp):
+        inside = fp == STATIC or fp.startswith(STATIC + os.sep)
+        if not inside or not os.path.isfile(fp):
+            # B-06: only extension-less paths fall back to the SPA shell; a typo'd asset must 404, not return HTML.
+            if os.path.splitext(path)[1]:
+                return self.send_json(404, {"error": "not found"})
             fp = os.path.join(STATIC, "index.html")
+        raw, gz, etag, gz_etag = cached_static(fp)
         ctype = mimetypes.guess_type(fp)[0] or "application/octet-stream"
-        texty = ctype.startswith("text/") or "javascript" in ctype or "json" in ctype or "svg" in ctype
-        gz = texty and "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
-        st = os.stat(fp)
-        key = (fp, bool(gz))
-        sig = (st.st_mtime_ns, st.st_size)
-        with STATIC_CACHE_LOCK:
-            hit = STATIC_CACHE.get(key)
-        if hit and hit[0] == sig:
-            data = hit[1]
-        else:
-            with open(fp, "rb") as f:
-                raw = f.read()
-            data = gzip.compress(raw, 6) if gz else raw
-            with STATIC_CACHE_LOCK:
-                if len(STATIC_CACHE) >= STATIC_CACHE_MAX:
-                    STATIC_CACHE.pop(next(iter(STATIC_CACHE)))
-                STATIC_CACHE[key] = (sig, data)
-        etag = '"%x-%x%s"' % (st.st_mtime_ns, st.st_size, "-gz" if gz else "")
-        lastmod = email.utils.formatdate(st.st_mtime, usegmt=True)
-        versioned = bool(parse_qs(query).get("v")) and not fp.endswith("index.html")
-        cache = "public, max-age=31536000, immutable" if versioned else "no-cache, must-revalidate"
-        inm = (self.headers.get("If-None-Match") or "").strip()
-        tags = [t.strip().lstrip("W/") for t in inm.split(",")] if inm else []
-        fresh = inm == "*" or etag in tags
-        if not fresh and not inm:
-            ims = (self.headers.get("If-Modified-Since") or "").strip()
-            if ims:
-                try:
-                    fresh = int(st.st_mtime) <= int(email.utils.parsedate_to_datetime(ims).timestamp())
-                except (TypeError, ValueError, OverflowError):
-                    pass
-        if fresh:
+        index = fp.endswith(os.sep + "index.html")
+        use_gz = bool(gz) and "gzip" in (self.headers.get("Accept-Encoding") or "")
+        body, tag = (gz, gz_etag) if use_gz else (raw, etag)
+        cache = "no-cache" if index else ("public, max-age=31536000, immutable" if "v=" in query else "public, max-age=3600")
+        if self.headers.get("If-None-Match") == tag:
             self.send_response(304)
-            self.send_header("ETag", etag)
-            self.send_header("Last-Modified", lastmod)
+            self.send_header("ETag", tag)
             self.send_header("Cache-Control", cache)
-            if gz:
+            if use_gz:
                 self.send_header("Vary", "Accept-Encoding")
-            self.end_headers()
-            return
+            return self.end_headers()
         self.send_response(200)
-        self.send_header("Content-Type", ctype + ("; charset=utf-8" if texty else ""))
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("ETag", etag)
-        self.send_header("Last-Modified", lastmod)
+        self.send_header("Content-Type", ctype + ("; charset=utf-8" if ctype.startswith("text") or "javascript" in ctype else ""))
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("ETag", tag)
         self.send_header("Cache-Control", cache)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        if gz:
+        self.send_header("Vary", "Accept-Encoding")
+        if use_gz:
             self.send_header("Content-Encoding", "gzip")
-            self.send_header("Vary", "Accept-Encoding")
         self.end_headers()
-        try:
-            self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
-            pass
+        self.wfile.write(body)
 
     def do_GET(self):
         self.dispatch("GET")
@@ -3313,8 +3258,8 @@ class Handler(BaseHTTPRequestHandler):
         body = {}
         if method == "POST":
             n = int(self.headers.get("Content-Length") or 0)
-            limit = int(getattr(fn, "max_body", 100_000))
-            if n > limit:
+            if n > 100_000:
+                self.close_connection = True   # body left unread: this socket cannot be reused
                 return self.send_json(413, {"error": "too big"})
             raw = self.rfile.read(n) if n else b""
             if getattr(fn, "raw", False):  # file uploads: the handler reads bytes, not JSON
@@ -3353,6 +3298,8 @@ class Handler(BaseHTTPRequestHandler):
                     c.ev.append({"t": "levelup", "level": li["level"], "rank": li["rank"], "emoji": li["emoji"], "new_title": new_title})
                     feed(c, "levelup", f"reached level {li['level']} · {li['emoji']} {li['rank']} ⬆️" + (" · NEW TITLE" if new_title else ""))
             conn.commit()
+            if method == "POST" and c.user:
+                EVAL_AT[(c.user["id"], iso(today()))] = time.monotonic()   # P-06: a write just paid out
             if isinstance(res, tuple):
                 return self.send_file(*res)
             if isinstance(res, dict):
@@ -3426,6 +3373,7 @@ def migrate(conn):
 def bootstrap():
     os.makedirs(DATA_DIR, exist_ok=True)
     conn = connect()
+    conn.execute("PRAGMA journal_mode=WAL")   # persistent; set once instead of on every request (P-08)
     conn.executescript(SCHEMA)
     migrate(conn)
     social_db.install(conn)   # additive social tables + one default server per crew

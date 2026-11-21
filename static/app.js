@@ -154,6 +154,23 @@ function toast(t, sub = '', cls = '') {
   box.appendChild(d); while (box.children.length > 3) box.firstChild.remove();
   setTimeout(() => d.remove(), 3500);
 }
+/* B-01: copy must await the clipboard promise and never toast success it did not get. */
+async function copyText(t, ok = 'Copied') {
+  try {
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(t);
+    else {
+      const ta = document.createElement('textarea'); ta.value = t; ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+      const good = document.execCommand('copy'); ta.remove();
+      if (!good) throw new Error('copy');
+    }
+    toast(ok);
+    return true;
+  } catch (e) {
+    await sheet(`<h2>Copy failed</h2><p class="sm mut mt8">Select the text and copy it manually.</p><input class="inp mt8" readonly value="${esc(t)}" onclick="this.select()"><div class="row g8 mt12"><button class="btn-p btn-lg grow" data-c="1">Done</button></div>`);
+    return false;
+  }
+}
 function confetti() {
   if (reduced()) return;
   const cs = getComputedStyle(document.documentElement), pick = (k, d) => cs.getPropertyValue(k).trim() || d;
@@ -219,7 +236,7 @@ function sheet(html) {
     const onKey = e => { if (e.key === 'Escape') done(null); };
     const done = v => { o.remove(); document.removeEventListener('keydown', onKey); res(v); };
     o.addEventListener('click', e => {
-      const cp = e.target.closest('[data-copy]'); if (cp) { try { navigator.clipboard?.writeText(cp.dataset.copy); toast('Copied'); } catch (x) { } return; }
+      const cp = e.target.closest('[data-copy]'); if (cp) { copyText(cp.dataset.copy); return; }
       const b = e.target.closest('[data-c]'); if (b) done(b.dataset.c); else if (e.target === o) done(null);
     });
     document.addEventListener('keydown', onKey);
@@ -357,7 +374,7 @@ function renderAuth() {
   closeModal(); $('.nav')?.remove(); $('.fab')?.remove(); $('#bell')?.remove();
 }
 
-Object.assign(S, { crewSec: 'home', meSec: 'overview', reflSub: 'diary', diary: null, dq: '', dmood: 0, dmoodPick: 3, dopen: {}, dedit: null });
+Object.assign(S, { crewSec: 'home', reflSub: 'diary', diary: null, dq: '', dmood: 0, dmoodPick: 3, dopen: {}, dedit: null });
 const NOTIF = { count: 0 };
 const topbar = () => `<div class="topbar"><h1>${esc((TABS.find(t => t[0] === S.tab) || [])[2] || '')}</h1></div>`;
 function enterAnim() { if (reduced()) return; const a = $('#app'); a.classList.remove('enter'); void a.offsetWidth; a.classList.add('enter'); setTimeout(() => a.classList.remove('enter'), 800); }
@@ -374,7 +391,7 @@ async function loadTab(tab) {
   }
   else if (tab === 'reflect') { const [r, w, rp] = await Promise.all([api('reflect'), api('weekly'), api('report')]); S.refl = r; S.weekly = w; S.report = rp; S.reportView = 'last'; if (S.reflSub === 'diary') await diaryLoad(); }
   else if (tab === 'me') { const [ins, gr] = await Promise.all([api('insights'), api('growth')]); S.ins = ins; S.growth = gr; }
-  else if (tab === 'chat') { if (window.Chat) await Chat.load(); else await chatLoadThreads(); }
+  else if (tab === 'chat') await chatLoadThreads();
 }
 async function go(tab) {
   const changed = tab !== S.tab, seq = ++_navSeq;
@@ -401,6 +418,52 @@ function ensureNav() {
   $$('.nav button').forEach(b => b.classList.toggle('on', b.dataset.v === S.tab));
   chatBadge(); bellDraw();
 }
+/* ---------- P-09: keyed DOM patching ----------
+   render() used to replace #app.innerHTML on every state change and poll. These helpers patch the
+   existing nodes in place (keyed by data-k / id / data-uid) so focus, selection, scroll, <details>
+   and CSS animations survive. Fallback matching is by position + tag for unkeyed nodes. */
+const morphKey = n => n.nodeType === 1 ? (n.getAttribute('data-k') || n.id || n.getAttribute('data-uid') || '') : '';
+function morphNode(from, to) {
+  if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName) { from.replaceWith(to.cloneNode(true)); return; }
+  if (from.nodeType === 3) { if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue; return; }
+  if (from.nodeType !== 1) return;
+  if (from.id === 'chat_msgs' || from.id === 'chat_ctx') return;   // owned by chatPaint/chatCtx
+  if ((from.id === 'clock' || from.id === 'ringc') && (S.today?.timer || S.today?.pomo)) return;   // tickOnce paints these
+  for (const a of [...to.attributes]) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+  for (const a of [...from.attributes]) {
+    // never close an open <details> just because the fresh HTML omits the attribute; render() restores them anyway
+    if (!to.hasAttribute(a.name) && !(from.nodeName === 'DETAILS' && a.name === 'open')) from.removeAttribute(a.name);
+  }
+  morphChildren(from, to);
+  const focused = document.activeElement === from;
+  if (from.nodeName === 'INPUT' && !focused && to.hasAttribute('value')) from.value = to.getAttribute('value');
+  else if (from.nodeName === 'TEXTAREA' && !focused) from.value = to.value;
+  else if (from.nodeName === 'SELECT' && !focused && to.hasAttribute('value')) from.value = to.getAttribute('value');
+}
+function morphChildren(from, to) {
+  const news = [...to.childNodes], byKey = new Map();
+  for (const n of from.childNodes) { const k = morphKey(n); if (k && !byKey.has(k)) byKey.set(k, n); }
+  const want = new Set(news.map(morphKey).filter(Boolean));
+  for (const [k, n] of byKey) if (!want.has(k)) { n.remove(); byKey.delete(k); }
+  let cur = from.firstChild;
+  for (const nk of news) {
+    const k = morphKey(nk);
+    let match = k ? byKey.get(k) : null;
+    if (!match) for (let n = cur; n; n = n.nextSibling) {
+      if (!morphKey(n) && n.nodeType === nk.nodeType && n.nodeName === nk.nodeName) { match = n; break; }
+    }
+    if (!match) { from.insertBefore(nk.cloneNode(true), cur); continue; }
+    if (match !== cur) from.insertBefore(match, cur);
+    morphNode(match, nk);
+    cur = match.nextSibling;
+  }
+  while (cur) { const next = cur.nextSibling; from.removeChild(cur); cur = next; }
+}
+function patchApp(html) {
+  const tpl = document.createElement('template'); tpl.innerHTML = html;
+  const app = $('#app'); if (app) morphChildren(app, tpl.content);
+}
+
 function render() {
   if (!S.user) return renderAuth();
   const y = window.scrollY, openK = $$('details[open][data-k]').map(d => d.dataset.k);
@@ -409,7 +472,7 @@ function render() {
   try { v = views[S.tab](); }
   catch (e) { console.error(e); v = '<section class="card c"><div class="b">This tab hit a snag.</div><p class="sm mut">Reload to try again.</p><button class="btn-s" data-act="reload">Reload</button></section>'; }
   const flip = S.tab === 'crew' && !reduced() ? new Map($$('.lb[data-uid]').map(e => [e.dataset.uid, e.getBoundingClientRect().top])) : null;
-  $('#app').innerHTML = topbar() + v;
+  patchApp(topbar() + v);
   if (flip) $$('.lb[data-uid]').forEach(e => { const p = flip.get(e.dataset.uid); if (p == null) return; const d = p - e.getBoundingClientRect().top; if (Math.abs(d) > 2) e.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: 420, easing: 'cubic-bezier(.2,.8,.2,1)' }); });
   runCounts();
   $('.fab')?.remove();
@@ -430,8 +493,11 @@ function thinkToast(r) { if (r && r.think_s != null) toast(`Started in ${fsec(r.
 const _jm = /^\/join\/([A-Za-z0-9]{4,12})\/?$/.exec(location.pathname);
 if (_jm) { S.joinCode = _jm[1].toUpperCase(); S.authMode = 'register'; try { history.replaceState(null, '', '/'); } catch (e) { } }
 async function boot() {
-  try { const me = await api('me'); S.user = me.user; sendOpen(); await go(S.tab); if (!S.user.onboarded) onboard(); }
-  catch (e) { if (!S.user) renderAuth(); }
+  try {
+    const me = await api('me'); S.user = me.user;
+    if (!S.user) return renderAuth();   // B-12: a logged-out boot must not fire authenticated calls
+    sendOpen(); await go(S.tab); if (!S.user.onboarded) onboard();
+  } catch (e) { if (!S.user) renderAuth(); }
 }
 /* ---------- timer engine ---------- */
 function setToday(t) {
@@ -767,7 +833,7 @@ function vSeason(x) {
     <div class="xs mut">Category wins pay ${x.cat_prize.toLocaleString()} XP each. Prizes go to players who put in ${x.min_hours}h verified and ${x.min_floor} floor days. No shortcuts, no manual logs.</div>`;
   if (me) h += `<div class="lbl2">Your qualification</div><div class="qual"><div class="row between xs mut"><span>Verified focus</span><span>${me.hours}h / ${x.min_hours}h</span></div><div class="bar thin"><i style="width:${clamp01(me.hours / x.min_hours * 100)}%"></i></div>
     <div class="row between xs mut mt4"><span>Floor days</span><span>${me.floor_days} / ${x.min_floor}</span></div><div class="bar thin"><i style="width:${clamp01(me.floor_days / x.min_floor * 100)}%"></i></div></div>`;
-  h += `<div class="lbl2">Standings</div>${x.rows.map(r => `<div class="srow ${r.me ? 'me' : ''} ${r.eligible ? '' : 'dim'}" data-act="profile" data-id="${r.id}"><div class="rk">${r.place ? `<span class="medal m${r.place}">${r.place}</span>` : r.rank}</div>${avatar(r.emoji, r.color, 'sm', null, r)}
+  h += `<div class="lbl2">Standings</div>${x.rows.map(r => `<div class="srow ${r.me ? 'me' : ''} ${r.eligible ? '' : 'dim'}" data-act="profile" data-id="${r.id}" data-k="srow-${r.id}"><div class="rk">${r.place ? `<span class="medal m${r.place}">${r.place}</span>` : r.rank}</div>${avatar(r.emoji, r.color, 'sm', null, r)}
     <div class="grow"><div class="lbn"><b class="ell">${esc(r.name)}</b>${r.me ? '<span class="you">you</span>' : ''}</div><div class="xs mut">${r.hours}h · ${r.floor_days}d floor${r.eligible ? '' : ' · qualifying'}</div></div><b class="num">${r.xp.toLocaleString()}</b></div>`).join('')}`;
   if (x.cats.length) h += `<div class="lbl2">Category leaders · ${x.cat_prize.toLocaleString()} XP each</div><div class="cats">${x.cats.map(c => `<div class="cat ${c.me ? 'me' : ''}"><div class="xs mut">${esc(c.label)}</div><div><b>${esc(c.emoji)} ${esc(c.name)}</b></div><div class="xs mut">${fmv(c.value, c.unit)}</div></div>`).join('')}</div>`;
   if (x.hall.length) h += `<div class="lbl2">Hall of fame</div>${x.hall.map(d => `<div class="hof"><b>Season ${d.season}</b><div class="xs">${d.podium.map((p, i) => `${medal[i]} ${esc(p.emoji)} ${esc(p.name)}`).join('  ·  ')}</div></div>`).join('')}`;
@@ -797,7 +863,7 @@ function crewHome(C, x) {
     <button class="stat tile" data-act="crewSec" data-v="goals"><b class="num">${C.boss && C.boss.passed === true ? 'Done' : bp + '%'}</b><span class="xs mut">boss battle</span><div class="bar thin mt8 ${C.boss && C.boss.passed === true ? 'g' : ''}"><i style="width:${bp}%"></i></div></button>
     <button class="stat tile" data-act="crewSec" data-v="rank"><b class="num">${fm(x.me.today_min)}</b><span class="xs mut">you today</span><div class="bar g thin mt8"><i style="width:${cpc(x.me.today_min, S.user.daily_min)}%"></i></div></button></div>`;
   if (live.length) h += `<section class="card">${lbl('Locked in right now')}${live.map(m => `<div class="q"><span class="dot live"></span><div class="grow"><b>${esc(m.display)}</b> <span class="xs mut">${esc(m.live.subject)} · ${fm(m.live.elapsed / 60)}</span></div></div>`).join('')}</section>`;
-  if (C.feed.length) h += `<section class="card">${lbl('Latest', `<button class="btn-s" data-act="crewSec" data-v="feed">All activity</button>`)}${C.feed.slice(0, 3).map(f => `<div class="feed"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div></div>`).join('')}</section>`;
+  if (C.feed.length) h += `<section class="card">${lbl('Latest', `<button class="btn-s" data-act="crewSec" data-v="feed">All activity</button>`)}${C.feed.slice(0, 3).map(f => `<div class="feed" data-k="latest-${f.id}"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div></div>`).join('')}</section>`;
   return h;
 }
 function crewRank(C, x) {
@@ -844,7 +910,7 @@ function crewFame(C) {
 }
 function crewFeed(C) {
   let h = '';
-  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed k-${esc(f.kind || '')}"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
+  h += `<section class="card">${lbl('Crew feed')}${C.feed.length ? C.feed.map(f => `<div class="feed k-${esc(f.kind || '')}" data-k="feed-${f.id}"><div class="row g8"><span data-act="profile" data-id="${f.user_id}" style="cursor:pointer">${avatar(f.emoji, f.color, 'sm', null, f)}</span><div class="grow sm"><b>${esc(f.display)}</b> ${esc(f.text).replace(/\*\*/g, '')}</div><span class="xs mut">${ago(f.ts)}</span></div>
     <div class="rxrow">${['🔥', '💪', '👏', '😤', '🫡'].map(e => `<button class="rx ${f.mine === e ? 'me' : ''}" data-act="react" data-id="${f.id}" data-e="${e}">${e}${f.reactions[e] ? ' ' + f.reactions[e] : ''}</button>`).join('')}</div></div>`).join('') : '<div class="mut sm">Quiet. Be the first to move.</div>'}</section>`;
   return h;
 }
@@ -1029,6 +1095,20 @@ function vMe() {
       <label>Avatar and colour</label><div class="row g8"><button data-act="openShop" class="grow">Change avatar or frame</button><input id="s_col" type="color" value="${esc(u.color)}" style="width:72px;padding:3px"></div>
       <label class="row g8" style="margin-top:14px"><input id="s_fx" type="checkbox" ${fxOn() ? 'checked' : ''}> <span class="sm tx">Sound and haptics</span></label><button class="btn-p btn-xl mt12" data-act="saveSettings">Save</button><button class="btn-xl mt8" data-act="notif">Enable alerts when friends start a block</button><button class="btn-d btn-xl mt8" data-act="logout">Log out</button></section>`;
   }
+  h += `<section class="card">${lbl('Last 12 weeks')}<div class="heat">${hm}</div><div class="xs mut mt8">Brighter means more focus. Blue means a streak freeze saved you.</div></section>`;
+  h += `<section class="card">${lbl('Weekly hours')}${bars(I.weeks.map(w => w.m), '#7c6af7')}<div class="row between xs mut"><span>8 weeks ago</span><span>this week ${fm(I.weeks[7].m)}</span></div></section>`;
+  if (I.hours.some(x => x)) h += `<section class="card">${lbl('Your best focus hours')}<div class="hrs">${I.hours.map(x => `<i style="height:${x / hrmx * 100}%"></i>`).join('')}</div><div class="row between xs mut mt4"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div><div class="sm mt8">Peak: <b>${best % 12 || 12}${best < 12 ? 'am' : 'pm'}</b>. Put your hardest chapter there.</div></section>`;
+  if (Object.keys(I.sub7).length) { const tot = Object.values(I.sub7).reduce((a, b) => a + b, 0); h += `<section class="card">${lbl('Subject balance', '7 days')}${Object.entries(I.sub7).sort((a, b) => b[1] - a[1]).map(([s, m]) => `<div class="row g8" style="margin:8px 0"><span class="sm w78">${esc(s)}</span><div class="bar grow"><i style="width:${m / tot * 100}%;background:${SCOL[s] || '#9a9aa8'}"></i></div><span class="xs mut w56 r">${fm(m)}</span></div>`).join('')}</section>`; }
+  if (I.urge_triggers.length) h += `<section class="card">${lbl('Your triggers')}<div class="chips">${I.urge_triggers.map(t => `<span class="pill">${esc(t.trigger)} ×${t.n}</span>`).join('')}</div></section>`;
+  h += `<section class="card">${lbl('Locker')}<div class="sm mut">Avatars and frames now live in the shop on the Crew tab.</div><button class="btn-xl mt12" data-act="openShop">Open the shop</button></section>`;
+  h += `<section class="card">${lbl('Badges', `${I.badges.filter(b => b.got).length}/${I.badges.length}`)}<div class="grid3">${I.badges.map(b => `<div class="badge r-${b.rarity} ${b.got ? '' : 'off'}"><s><i>${esc(b.emoji)}</i></s><b>${esc(b.name)}</b><div class="xs mut">${esc(b.desc)}</div><div class="rar">${esc(b.rname)} · +${b.xp} XP · held by ${b.holders}/${b.total}</div></div>`).join('')}</div></section>`;
+  if (u.admin) h += `<section class="card">${lbl('Server')}<p class="sm mut">You run this crew. Live stats, PIN resets, moderation, backups.</p><button class="btn-xl" data-act="admin">Open server dashboard</button></section>`;
+  h += `<section class="card">${lbl('Settings')}<label>Display name</label><input id="s_name" value="${esc(u.display)}" maxlength="20"><label>Identity: "I am becoming someone who…"</label><input id="s_id" value="${esc(u.identity)}" placeholder="shows up before he feels like it" maxlength="140">
+    <div class="grid2"><div><label>Old A+ you studied (hrs/day)</label><input id="s_base" type="number" step="0.5" value="${u.baseline_h}"></div><div><label>Daily floor (min)</label><input id="s_floor" type="number" value="${u.daily_min}"></div></div>
+    <label>Exams (name and date)</label>${[0, 1, 2].map(i => { const x = u.exams[i] || {}; return `<div class="row g8" style="margin-bottom:6px"><input id="s_en${i}" placeholder="JEE Main" value="${esc(x.name || '')}"><input id="s_ed${i}" type="date" value="${esc(x.date || '')}" style="width:156px"></div>`; }).join('')}
+    <label>Avatar and colour</label><div class="row g8"><button data-act="openShop" class="grow">Change avatar or frame</button><input id="s_col" type="color" value="${esc(u.color)}" style="width:72px;padding:3px"></div>
+    <label class="row g8" style="margin-top:14px"><input id="s_fx" type="checkbox" ${fxOn() ? 'checked' : ''}> <span class="sm tx">Sound and haptics</span></label><button class="btn-p btn-xl mt12" data-act="saveSettings">Save</button><button class="btn-xl mt8" data-act="notif">Enable alerts when friends start a block</button><button class="btn-d btn-xl mt8" data-act="logout">Log out</button></section>`;
+  if (I.xp_log.length) h += `<section class="card">${lbl('Recent XP')}${I.xp_log.map(x => `<div class="row between sm" style="padding:4px 0"><span class="mut">${esc(x.label)}</span><b class="num">${x.amount > 0 ? '+' : ''}${x.amount}</b></div>`).join('')}</section>`;
   return h;
 }
 
@@ -1157,7 +1237,7 @@ const A = {
   async react(el) { await api('react', { feed_id: +el.dataset.id, emoji: el.dataset.e }); S.crew = await api('crew'); render(); },
   async duel() { await api('duel', { opponent: +val('du_o'), days: +val('du_d') }); toast('Challenge sent'); await refresh(); },
   async acceptDuel(el) { await api('duel/accept', { id: +el.dataset.id }); await refresh(); },
-  copy(el) { try { navigator.clipboard?.writeText(el.dataset.v); toast(el.dataset.t || 'Invite code copied'); } catch (e) { toast('Copy failed', el.dataset.v); } },
+  async copy(el) { await copyText(el.dataset.v, el.dataset.t || 'Invite code copied'); },
   async saveSettings() {
     const ex = [0, 1, 2].map(i => ({ name: val('s_en' + i) || 'Exam', date: val('s_ed' + i) })).filter(x => x.date);
     const r = await api('settings', { display: val('s_name'), identity: val('s_id'), baseline_h: +val('s_base'), daily_min: +val('s_floor'), exams: ex, color: val('s_col') }); S.user = r.user; try { localStorage.setItem('rg_fx', JSON.stringify(!!($('#s_fx') && $('#s_fx').checked))); } catch (e) { } toast('Saved'); await refresh();
@@ -1244,7 +1324,27 @@ document.addEventListener('input', e => {
 document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && S.fs && S.fsNative) { exitFullscreenFocus(); } });
 /* heartbeat: while a block runs the app checks in silently every 50 s. No taps, no popups, zero attention cost. */
 function hbPing() { if (S.user && S.today && S.today.timer) fetch('/api/timer/ping', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', keepalive: true }).catch(() => { }); }
-setInterval(hbPing, 50000);
+/* ---------- P-11: one visibility-aware scheduler.
+   Replaces four independent setIntervals that kept firing from background tabs. Tasks run when the
+   tab is visible (and the host pane is visible); the timer heartbeat is the only hidden-tab task.
+   A slow request marks the task busy, so nothing overlaps. `S.hostVisible` is for the Phase 2 bridge. */
+const RAG_TASKS = [];
+let _schedT = null;
+function schedEvery(name, ms, fn, opts = {}) {
+  RAG_TASKS.push({ name, ms, fn, hidden: !!opts.hidden, busy: false, at: 0 });
+}
+function schedLoop() {
+  clearTimeout(_schedT);
+  const now = Date.now(), visible = !document.hidden && S.hostVisible !== false;
+  for (const t of RAG_TASKS) {
+    if (t.busy || (!visible && !t.hidden) || now - t.at < t.ms) continue;
+    t.at = now; t.busy = true;
+    Promise.resolve().then(t.fn).catch(() => { }).finally(() => { t.busy = false; });
+  }
+  _schedT = setTimeout(schedLoop, 1000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) for (const t of RAG_TASKS) t.at = 0; });
+schedEvery('hb', 50000, hbPing, { hidden: true });   // the one task that must keep running with the tab hidden
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !S.user) return;
   hbPing();
@@ -1265,7 +1365,7 @@ async function chatLoadThreads() {
   Object.assign(CH, { threads: r.threads, people: r.people, unread: r.unread, total: r.total, seq: r.seq });
 }
 function chatStop() { CH.run++; if (CH.ctl) { try { CH.ctl.abort(); } catch (e) { } CH.ctl = null; } }
-function chatReset() { chatStop(); Object.assign(CH, { threads: [], people: {}, open: null, msgs: [], more: false, seq: -1, unread: {}, total: 0, notified: 0 }); try { window.Chat && Chat.reset && Chat.reset(); } catch (e) { } }
+function chatReset() { chatStop(); Object.assign(CH, { threads: [], people: {}, open: null, msgs: [], more: false, seq: -1, unread: {}, total: 0, notified: 0, painted: null }); }
 function chatBadge() {
   if (window.Chat && Chat.badge) return Chat.badge();
   const b = document.querySelector('.nav button[data-v="chat"]'); if (!b) return;
@@ -1297,27 +1397,74 @@ function vThreads() {
 }
 function chatAfterRender() { if (CH.open) { chatPaint(true); chatCtx(); const ta = $('#chat_in'); if (ta && !matchMedia('(pointer:coarse)').matches) ta.focus(); } }
 
-function chatPaint(stick) {
+function chatMsgHTML(m, prev) {
+  const p = CH.people[m.uid] || { display: 'Member', emoji: '👤', color: '#8b8ba3' };
+  const grp = prev && prev.uid === m.uid && (new Date(m.ts) - new Date(prev.ts)) < 5 * 60e3;
+  const mine = m.uid === S.user.id, sel = CH.sel === m.id;
+  const ment = !mine && m.text.toLowerCase().includes('@' + String(S.user.display).toLowerCase());
+  const canEdit = mine && (Date.now() - new Date(m.ts).getTime()) < 30 * 60e3; // B-02: match the server window
+  const rx = m.re ? `<div class="rxs">${Object.entries(m.re).map(([e, n]) => `<span class="rx ${m.mine === e ? 'me' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e} ${n}</span>`).join('')}</div>` : '';
+  const acts = sel ? `<div class="acts">${CHAT_EMOJIS.map(e => `<button class="${m.mine === e ? 'on' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}<button data-act="chatReply" data-id="${m.id}" title="Reply">↩</button>${canEdit ? `<button data-act="chatEdit" data-id="${m.id}" title="Edit">✏️</button>` : ''}${mine ? `<button data-act="chatDel" data-id="${m.id}" title="Delete">🗑</button>` : ''}</div>` : '';
+  const qt = m.reply ? `<div class="qt" data-act="chatJump" data-id="${m.reply.id}"><b>${esc((CH.people[m.reply.uid] || {}).display || 'Member')}</b> ${esc(m.reply.text)}</div>` : '';
+  return `<div class="msg ${grp ? 'grp' : ''} ${ment ? 'ment' : ''} ${sel ? 'sel' : ''}" data-act="chatSel" data-id="${m.id}" data-mid="${m.id}" data-k="m${m.id}">${grp ? '<div class="av sp"></div>' : `<span data-act="profile" data-id="${m.uid}" style="cursor:pointer">${avatar(p.emoji, p.color, '', null, p)}</span>`}
+    <div class="mb">${grp ? '' : `<div class="mh"><b style="color:${esc(p.color)}" data-act="chatMention" data-v="${esc(p.display)}">${esc(p.display)}</b><span class="xs mut">${chatClock(m.ts)}</span></div>`}${qt}<div class="mt">${chatFmt(m.text)}${m.edited ? ' <span class="xs mut">(edited)</span>' : ''}</div>${rx}${acts}</div></div>`;
+}
+const chatDayHTML = day => `<div class="daysep" data-day="${esc(day)}" data-k="day-${esc(day)}"><span>${esc(day)}</span></div>`;
+const elOf = html => { const t = document.createElement('template'); t.innerHTML = html; return t.content.firstElementChild; };
+const chatSig = (m, prev) => JSON.stringify([m.text, !!m.edited, m.re || null, m.mine || null, CH.sel === m.id, m.reply ? m.reply.id : null,
+  CH.people[m.uid] || null, prev ? prev.id : null, prev ? prev.ts : null, S.user.display]);
+
+/* P-10: append one node per new message, update only the node that changed. A full paint happens
+   on thread open and "load earlier"; everything else (send, react, edit, delete, poll) is local. */
+function chatPaint(stick, force) {
   const el = $('#chat_msgs'); if (!el) return;
-  let h = CH.more ? '<div class="c"><button class="btn-s" data-act="chatOlder">Load earlier messages</button></div>' : '';
-  if (!CH.msgs.length && !CH.loading) h += '<div class="mut sm c" style="margin:40px 0">No messages yet. Say hi.</div>';
-  let prev = null, prevDay = '';
-  CH.msgs.forEach(m => {
-    const day = chatDay(m.ts);
-    if (day !== prevDay) { h += `<div class="daysep"><span>${esc(day)}</span></div>`; prevDay = day; prev = null; }
-    const p = CH.people[m.uid] || { display: 'Member', emoji: '👤', color: '#8b8ba3' };
-    const grp = prev && prev.uid === m.uid && (new Date(m.ts) - new Date(prev.ts)) < 5 * 60e3;
-    const mine = m.uid === S.user.id, sel = CH.sel === m.id;
-    const ment = !mine && m.text.toLowerCase().includes('@' + String(S.user.display).toLowerCase());
-    const canEdit = mine && (Date.now() - new Date(m.ts).getTime()) < 24 * 3600e3; // server enforces the real 30 min window
-    const rx = m.re ? `<div class="rxs">${Object.entries(m.re).map(([e, n]) => `<span class="rx ${m.mine === e ? 'me' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e} ${n}</span>`).join('')}</div>` : '';
-    const acts = sel ? `<div class="acts">${CHAT_EMOJIS.map(e => `<button class="${m.mine === e ? 'on' : ''}" data-act="chatReact" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}<button data-act="chatReply" data-id="${m.id}" title="Reply" aria-label="Reply">${ic('reply',15)}</button>${canEdit ? `<button data-act="chatEdit" data-id="${m.id}" title="Edit" aria-label="Edit">${ic('edit',15)}</button>` : ''}${mine ? `<button data-act="chatDel" data-id="${m.id}" title="Delete" aria-label="Delete">${ic('trash',15)}</button>` : ''}</div>` : '';
-    const qt = m.reply ? `<div class="qt" data-act="chatJump" data-id="${m.reply.id}"><b>${esc((CH.people[m.reply.uid] || {}).display || 'Member')}</b> ${esc(m.reply.text)}</div>` : '';
-    h += `<div class="msg ${grp ? 'grp' : ''} ${ment ? 'ment' : ''} ${sel ? 'sel' : ''}" data-act="chatSel" data-id="${m.id}" data-mid="${m.id}">${grp ? '<div class="av sp"></div>' : `<span data-act="profile" data-id="${m.uid}" style="cursor:pointer">${avatar(p.emoji, p.color, '', null, p)}</span>`}
-      <div class="mb">${grp ? '' : `<div class="mh"><b style="color:${esc(p.color)}" data-act="chatMention" data-v="${esc(p.display)}">${esc(p.display)}</b><span class="xs mut">${chatClock(m.ts)}</span></div>`}${qt}<div class="mt">${chatFmt(m.text)}${m.edited ? ' <span class="xs mut">(edited)</span>' : ''}</div>${rx}${acts}</div></div>`;
+  const painted = el.querySelector('.msg[data-mid]');
+  if (force || CH.painted !== CH.open || (CH.msgs.length && !painted) || (!CH.msgs.length && !el.firstChild)) return chatFullPaint(el, stick);
+  if (!CH.msgs.length) return chatFullPaint(el, stick);
+  el.querySelector('#chat_empty')?.remove();
+  const ids = new Set(CH.msgs.map(m => m.id));
+  for (const n of [...el.querySelectorAll('.msg[data-mid]')]) if (!ids.has(+n.dataset.mid)) n.remove();
+  let prev = null;
+  for (const m of CH.msgs) {
+    const sig = chatSig(m, prev);
+    let node = el.querySelector(`.msg[data-mid="${m.id}"]`);
+    if (!node) {
+      const at = [...el.querySelectorAll('.msg[data-mid]')].find(n => +n.dataset.mid > m.id) || null;
+      const day = chatDay(m.ts);
+      if ((!prev || chatDay(prev.ts) !== day) && ![...el.querySelectorAll('.daysep')].some(n => n.dataset.day === day)) {
+        el.insertBefore(elOf(chatDayHTML(day)), at);
+      }
+      node = elOf(chatMsgHTML(m, prev));
+      el.insertBefore(node, at);
+    } else if (node.dataset.sig !== sig) {
+      node.outerHTML = chatMsgHTML(m, prev);
+      node = el.querySelector(`.msg[data-mid="${m.id}"]`);
+    }
+    if (node) node.dataset.sig = sig;
     prev = m;
-  });
-  el.innerHTML = h;
+  }
+  // a day separator whose messages were all deleted has to go too
+  let sep = null;
+  for (const n of [...el.children]) {
+    if (n.classList.contains('daysep')) { if (sep) sep.remove(); sep = n; }
+    else if (n.classList.contains('msg') || n.id === 'chat_empty') sep = null;
+  }
+  if (sep) sep.remove();
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+function chatFullPaint(el, stick) {
+  el.innerHTML = '';
+  if (CH.more) el.insertAdjacentHTML('beforeend', '<div class="c"><button class="btn-s" data-act="chatOlder">Load earlier messages</button></div>');
+  if (!CH.msgs.length && !CH.loading) el.insertAdjacentHTML('beforeend', '<div class="mut sm c" id="chat_empty" style="margin:40px 0">No messages yet. Say hi 👋</div>');
+  let prev = null, prevDay = '';
+  for (const m of CH.msgs) {
+    const day = chatDay(m.ts);
+    if (day !== prevDay) { el.insertAdjacentHTML('beforeend', chatDayHTML(day)); prevDay = day; prev = null; }
+    const node = elOf(chatMsgHTML(m, prev));
+    if (node) { node.dataset.sig = chatSig(m, prev); el.appendChild(node); }
+    prev = m;
+  }
+  CH.painted = CH.open;
   if (stick) el.scrollTop = el.scrollHeight;
 }
 
@@ -1352,6 +1499,7 @@ async function chatOpen(key) {
 async function chatLoop() {
   const my = ++CH.run; let fails = 0;
   while (CH.run === my && S.user && S.tab === 'chat' && CH.open) {
+    if (document.hidden) { await new Promise(ok => setTimeout(ok, 1500)); continue; }   // P-11: no long-poll from a hidden tab
     const last = CH.msgs.length ? CH.msgs[CH.msgs.length - 1].id : 0, first = CH.msgs.length ? CH.msgs[0].id : 0;
     const ctl = new AbortController(); CH.ctl = ctl;
     try {
@@ -1430,7 +1578,7 @@ async function chatOlder() {
     const r = await api(`chat/messages?thread=${chatKey(CH.open)}&before=${first}`);
     const el = $('#chat_msgs'), h0 = el.scrollHeight;
     CH.msgs = r.messages.concat(CH.msgs); CH.more = r.more; Object.assign(CH.people, r.people);
-    chatPaint(false); el.scrollTop = el.scrollHeight - h0;
+    chatPaint(false, true); el.scrollTop = el.scrollHeight - h0;
   } catch (e) { }
 }
 Object.assign(A, {
@@ -1449,7 +1597,7 @@ document.addEventListener('visibilitychange', () => {
   fetch('/api/chat/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thread: CH.open, id: CH.msgs[CH.msgs.length - 1].id }) }).catch(() => { });
 });
 /* unread badge + alerts while you're anywhere except inside a conversation */
-setInterval(async () => {
+async function chatUnreadTick() {
   if (!S.user || (S.tab === 'chat' && CH.open)) return;
   try {
     const res = await fetch('/api/chat/unread'); if (!res.ok) return;
@@ -1458,9 +1606,10 @@ setInterval(async () => {
       if (CH.notified && 'Notification' in window && Notification.permission === 'granted') new Notification(`New message · ${r.latest.from}`, { body: r.latest.text });
       CH.notified = r.latest.id;
     }
-    if (S.tab === 'chat' && !CH.open && !document.hidden && !window.Chat) { await chatLoadThreads(); render(); }
+    if (S.tab === 'chat' && !CH.open) { await chatLoadThreads(); render(); }
   } catch (e) { }
-}, 12000);
+}
+schedEvery('unread', 12000, chatUnreadTick);
 
 /* ---------- admin dashboard (only for RAGDAMAXING_ADMINS) ---------- */
 const fmUp = s => s >= 86400 ? Math.floor(s / 86400) + 'd ' + Math.floor(s % 86400 / 3600) + 'h' : s >= 3600 ? Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm' : Math.floor(s / 60) + 'm';
@@ -1533,19 +1682,25 @@ document.addEventListener('change', e => { if (e.target.id === 'actFilterUser') 
 
 /* ---------- live presence: refresh the visible tab without ever interrupting you ---------- */
 let seenLive = new Set();
-setInterval(async () => {
-  if (!S.user || document.hidden || S.fs) return;
+async function presenceTick() {
+  if (!S.user || S.fs) return;
   const ae = document.activeElement, typing = ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName);
   if (typing || S.urge || modalOpen() || Date.now() - S.lastPtr < 2500) return;
   try {
     if (S.tab === 'today') {
       const t = await api('today'), running = !!(S.today?.timer || S.today?.pomo);
+      const before = JSON.stringify(S.today, (k, v) => k === 'events' ? undefined : v);   // no repaint when nothing changed
       setToday(t);
       t.live.forEach(l => { const k = l.display + l.subject; if (!seenLive.has(k) && 'Notification' in window && Notification.permission === 'granted') new Notification(`${l.display} is locked in on ${l.subject}`, { body: 'Join them. Start a block.' }); seenLive.add(k); });
-      if (!(running && (t.timer || t.pomo))) render();
-    } else if (S.tab === 'crew') { S.crew = await api('crew'); render(); }
+      if (!(running && (t.timer || t.pomo)) && JSON.stringify(t, (k, v) => k === 'events' ? undefined : v) !== before) render();
+    } else if (S.tab === 'crew') {
+      const next = await api('crew'), before = JSON.stringify(S.crew);
+      S.crew = next;
+      if (JSON.stringify(next) !== before) render();
+    }
   } catch (e) { }
-}, 25000);
+}
+schedEvery('presence', 25000, presenceTick);
 
 /* ---------- DIARY (Reflect tab) ---------- */
 const dDate = d => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -1613,10 +1768,9 @@ async function notifRefresh() {
   if (!S.user || document.hidden) return;
   try { const res = await fetch('/api/notifs?count=1'); if (!res.ok) return; NOTIF.count = (await res.json()).count; bellDraw(); } catch (e) { }
 }
-setInterval(notifRefresh, 15000);
+schedEvery('bell', 15000, notifRefresh);
 
 Object.assign(A, {
-  meSec(el) { S.meSec = el.dataset.v; render(); $('.float .on')?.scrollIntoView({ inline: 'center', block: 'nearest' }); },
   async crewSec(el) { S.crewSec = el.dataset.v; if (S.crewSec === 'shop') { try { S.shop = await api('shop'); } catch (e) { } } render(); $('.float .on')?.scrollIntoView({ inline: 'center', block: 'nearest' }); },
   async openShop() { S.crewSec = 'shop'; await go('crew'); },
   async setStarter(el) { try { const r = await api('settings', { emoji: el.dataset.v }); S.user = r.user; S.shop = await api('shop'); await refresh(); } catch (e) { } },
@@ -1652,4 +1806,4 @@ Object.assign(A, {
 });
 
 
-boot(); notifRefresh();
+boot(); notifRefresh(); schedLoop();
